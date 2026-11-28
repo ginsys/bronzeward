@@ -5,7 +5,8 @@
 #   c   machinery v1.14.7, the latest v1.14 patch on 2026-11-28 (v1.14.6 holds the same module code)
 # The patch carries go.mod only, which pins every version. Go writes go.sum for the changed modules
 # here and checks each new entry against the checksum database, so this refuses to run with that
-# check off, and fails if writing go.sum changes go.mod. go.sum is not committed for these builds.
+# check off (for both builds, and with any GOFLAGS but -v), and fails if writing go.sum changes
+# go.mod. go.sum is not committed for these builds.
 # It creates the directory and removes nothing.
 set -euo pipefail
 
@@ -30,17 +31,22 @@ for p in "${patches[@]}"; do
 	(cd "$dir" && git apply --unidiff-zero "$here/patches/$p.patch")
 done
 
+# Both builds refuse a changed environment: A's modules are checked against the database when they
+# download, and a GOFLAGS such as -skip would let a test run end successfully with nothing run.
+(
+	cd "$dir"
+	sumdb=$(go env GOSUMDB)
+	skipped=$(go env GONOSUMDB)$(go env GOPRIVATE)$(go env GOINSECURE)
+	flags=$(go env GOFLAGS)
+	# -v only makes go print more (the cluster pod sets it); any other flag refuses.
+	if [ "$sumdb" != sum.golang.org ] || [ -n "$skipped" ] || { [ -n "$flags" ] && [ "$flags" != -v ]; }; then
+		echo "build: checksum database verification may be off: GOSUMDB='$sumdb', GONOSUMDB, GOPRIVATE and GOINSECURE together='$skipped', GOFLAGS='$flags'" >&2
+		exit 1
+	fi
+) || exit 1
 if [ ${#patches[@]} -gt 0 ]; then
 	(
 		cd "$dir"
-		sumdb=$(go env GOSUMDB)
-		skipped=$(go env GONOSUMDB)$(go env GOPRIVATE)$(go env GOINSECURE)
-		flags=$(go env GOFLAGS)
-		# -v only makes go print more (the cluster pod sets it); any other flag refuses.
-		if [ "$sumdb" != sum.golang.org ] || [ -n "$skipped" ] || { [ -n "$flags" ] && [ "$flags" != -v ]; }; then
-			echo "build: checksum database verification may be off: GOSUMDB='$sumdb', GONOSUMDB, GOPRIVATE and GOINSECURE together='$skipped', GOFLAGS='$flags'" >&2
-			exit 1
-		fi
 		cp go.mod go.mod.pinned
 		go mod tidy
 		cmp go.mod go.mod.pinned || { echo "build: go mod tidy changed the pinned go.mod" >&2; exit 1; }

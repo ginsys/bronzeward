@@ -252,6 +252,76 @@ func etcdProviders(cfg talosconfig.Provider) string {
 	return strings.Join(out, ",")
 }
 
+// canonicalEncryptionInput is the generated configuration with each AES-CBC provider named as the
+// fixed generator names it. v1.14.5 writes that provider's key (named key1) under "secretbox"; the
+// input must carry the shape a node or a later generator has, whichever build wrote it. It returns
+// the new bytes and the provider kinds in order.
+func canonicalEncryptionInput(t *testing.T, raw []byte) ([]byte, []string) {
+	t.Helper()
+	var out strings.Builder
+	var kinds []string
+	enc := yaml.NewEncoder(&out)
+	enc.SetIndent(2)
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	for {
+		var doc yaml.Node
+		if err := dec.Decode(&doc); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatal("a generated document does not decode")
+		}
+		var walk func(n *yaml.Node, inProviders bool)
+		walk = func(n *yaml.Node, inProviders bool) {
+			switch n.Kind {
+			case yaml.DocumentNode, yaml.SequenceNode:
+				for _, c := range n.Content {
+					walk(c, inProviders)
+				}
+			case yaml.MappingNode:
+				for i := 0; i+1 < len(n.Content); i += 2 {
+					k, v := n.Content[i], n.Content[i+1]
+					if !inProviders {
+						walk(v, k.Value == "providers")
+						continue
+					}
+					if k.Value == "secretbox" && firstKeyName(v) == "key1" {
+						k.Value = "aescbc"
+					}
+					kinds = append(kinds, k.Value)
+				}
+			}
+		}
+		walk(&doc, false)
+		if err := enc.Encode(&doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return []byte(out.String()), kinds
+}
+
+// firstKeyName is the name of the first key of a provider body, "" when there is none.
+func firstKeyName(body *yaml.Node) string {
+	if body.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(body.Content); i += 2 {
+		if body.Content[i].Value != "keys" || len(body.Content[i+1].Content) == 0 {
+			continue
+		}
+		first := body.Content[i+1].Content[0]
+		for j := 0; j+1 < len(first.Content); j += 2 {
+			if first.Content[j].Value == "name" {
+				return first.Content[j+1].Value
+			}
+		}
+	}
+	return ""
+}
+
 // encryption generates each variant with this build's own generator and compiles the result through
 // Bronzeward's compiler (the "own-enc" cases: they differ between builds where the generator does).
 // The build that runs first also writes the variants as inputs, so that every build compiles the
@@ -267,7 +337,13 @@ func (p *probeRun) encryption(writeInputs bool) {
 			p.write(p.out, "gen-enc-"+v.id+".yaml", bare)
 			p.say("enc %s generated=%s providers=%s", v.id, digestOf(bare), etcdProviders(cfg))
 			if writeInputs {
-				p.write(p.in, "base-enc-"+v.id+".yaml", encoded(t, cfg, encoder.CommentsAll))
+				input, kinds := canonicalEncryptionInput(t, encoded(t, cfg, encoder.CommentsAll))
+				want := map[string]string{"sbox": "secretbox", "aescbc": "aescbc", "both": "secretbox,aescbc"}[v.id]
+				if got := strings.Join(kinds, ","); got != want {
+					t.Fatalf("input %s has providers %q, want %q", v.id, got, want)
+				}
+				t.Logf("enc %s input providers=%s", v.id, want)
+				p.write(p.in, "base-enc-"+v.id+".yaml", input)
 			}
 			id := "own-enc-" + v.id
 			base, err := ingestProbe(probeFrag{text: string(bare)})
@@ -634,13 +710,14 @@ func TestTalos114KeyDiff(t *testing.T) {
 	if err != nil || len(files) == 0 {
 		t.Fatal("no outputs to compare")
 	}
-	compared, differing := 0, 0
+	compared, differing, unmatched := 0, 0, 0
 	for _, fa := range files {
 		name := filepath.Base(fa)
 		fb := filepath.Join(b, name)
 		rb, err := os.ReadFile(fb)
 		if errors.Is(err, os.ErrNotExist) {
 			fmt.Printf("keydiff %s only-in-first\n", name)
+			unmatched++
 			continue
 		}
 		if err != nil {
@@ -690,7 +767,12 @@ func TestTalos114KeyDiff(t *testing.T) {
 	for _, fb := range only {
 		if _, err := os.Stat(filepath.Join(a, filepath.Base(fb))); errors.Is(err, os.ErrNotExist) {
 			fmt.Printf("keydiff %s only-in-second\n", filepath.Base(fb))
+			unmatched++
 		}
 	}
-	fmt.Printf("keydiff compared=%d differing=%d\n", compared, differing)
+	fmt.Printf("keydiff compared=%d differing=%d unmatched=%d\n", compared, differing, unmatched)
+	// A comparison that matched no file, or left a file unmatched, says nothing about equality.
+	if compared == 0 || unmatched > 0 {
+		t.Fatalf("the key comparison is not complete: compared=%d unmatched=%d", compared, unmatched)
+	}
 }
