@@ -175,9 +175,9 @@ export function AccountingForm({ machine, path, resource, what, label = "Record 
           <p><label>Explanation{needed ? " (required: the resource version moved)" : " (needed only if the resource version moved)"} <input name="explanation" value={explanation} autoComplete="off" disabled={busy} onChange={(e) => setExplanation(e.target.value)} /></label></p>
         </>
       )}
-      <p><button type="button" disabled={busy} onClick={() => setAgain((i) => i + 1)}>Read the observations again</button></p>
+      <p><button type="button" className="outline" disabled={busy} onClick={() => setAgain((i) => i + 1)}>Read the observations again</button></p>
       <p data-testid="settle-judgment">{accountRisk(what)}</p>
-      <p><Action label={label} needs={["recovery-admin"]} submit busy={busy || list.kind !== "ok" || observations.length === 0} /></p>
+      <p><Action label={label} needs={["recovery-admin"]} submit busy={busy || list.kind !== "ok" || observations.length === 0} variant="secondary" /></p>
       {note !== undefined && <p role="alert" data-testid="settle-input">{note}</p>}
       <div ref={answer} tabIndex={-1} data-testid="settle-answer">
         <Result w={w} done={done} />

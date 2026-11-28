@@ -148,6 +148,8 @@ describe("the recovery page of one operation (#365)", () => {
     expect(await $('form[aria-label="Take over"] button').isEnabled()).toBe(false);
     // once: the same Action element as the line above
     expect(await $('form[aria-label="Resolve as cancelled"] button').isEnabled()).toBe(false);
+    // The whole note, the role sentence included, is behind "What is this page?" (ginsys/bronzeward#1268): open it first.
+    await $("details.about > summary").click();
     await expect($('[data-testid="page-note"]')).toHaveText(expect.stringContaining("recovery-admin"));
     expect(await $("main").getText()).toContain("Needs recovery-admin");
     await absent(async () => (await posts("takeovers")).length + (await posts("resolutions")).length > 0, "a write by a role that cannot decide");

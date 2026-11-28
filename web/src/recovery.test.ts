@@ -120,7 +120,7 @@ describe("the console's parts (#364)", () => {
     expect(exit(["recovery-admin"], 1)).toContain("1 scope not released (ready is not released)");
     expect(exit(["recovery-admin"], 0, false)).toContain("Recovery mode is off");
     const open = exit(["recovery-admin"], 0);
-    expect(open).toMatch(/<button type="submit">Exit recovery<\/button>/);
+    expect(open).toMatch(/<button type="submit" class="outline">Exit recovery<\/button>/);
     expect(open).not.toContain("not released");
   });
 
@@ -172,7 +172,7 @@ describe("the console's parts (#364)", () => {
     for (const roles of [["author"], ["recovery-admin"]] as Role[][]) {
       const form = shell(roles, h(Revocation));
       for (const limit of REVOCATION_LIMITS) expect(form).toContain(limit);
-      expect(form).toMatch(/<button type="submit" disabled="">Revoke identity<\/button>/);
+      expect(form).toMatch(/<button type="submit" class="outline" disabled="">Revoke identity<\/button>/);
     }
     expect(shell(["author"], h(Revocation))).toContain("Needs recovery-admin");
     expect(shell(["recovery-admin"], h(Revocation))).toContain("Name the identity, or the issuer and subject, and give a reason");
