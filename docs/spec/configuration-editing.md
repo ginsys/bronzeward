@@ -40,8 +40,10 @@ The facts below were read in the web client and the specifications at `origin/ma
 forms", and "better forms and displaying of structured config, not just json boxes". On 28 November 2026
 the owner said how to read those words: "My message, how you quote it was not a request for the design,
 but was a statement about how it is now, meaning that is wrong." So they describe the console as it is
-today, which section 1 confirms against the code, and say that it is wrong. They are the first usability
-measurement of the editor, and the measurement that the accepted choice in section 2 said was missing.
+today, and say that it is wrong. The code bears this out for the fragment editor and for the imported
+configuration. For "Add profile" it shows a list of pinned fragments, not a text box (above), and this
+specification does not change that list. The words are the first usability measurement of the editor, and
+the measurement that the accepted choice in section 2 said was missing.
 
 ## 2. What this changes in the accepted text
 
@@ -106,7 +108,10 @@ Three accepted rules bound this specification and stay as they are:
 1. **Read.** The page parses the stored text with the `yaml` package into a document tree that records
    where each node sits in the text. A fragment is a stream of documents: each document is matched to
    a Talos document kind by its `apiVersion` and `kind`, which the schema gives as lists of allowed
-   values. The legacy `v1alpha1` document has neither and is matched by its `version` key.
+   values. A document with neither `apiVersion` nor `kind` is read as the legacy `v1alpha1` document, whether
+   or not it has a `version` key: a fragment is a partial patch, and the API accepts and saves one such as
+   `machine:` with a `token` under it and no `version` key. The form shows it with the legacy schema and
+   never adds a discriminator to its stored text.
 2. **Show.** Each matched document shows as grouped fields: a heading per object, a labelled control per
    field, the schema's description as help text, a list of allowed values as a choice list, a list as rows
    with *Move up*, *Move down* and *Remove*, a map as rows of key and value. Fields the fragment does not
@@ -133,6 +138,10 @@ Three accepted rules bound this specification and stay as they are:
    - One edit per field kind (text, number, yes or no, choice, list row, map row, reference) changes only the
      lines of that node. The test compares the text before and after.
    - An edit and its undo return the original bytes.
+   - A fragment with no `version`, `apiVersion` or `kind` key, such as a partial `machine:` patch, opens
+     with the legacy schema and is saved with no key added.
+   - A mark set on a row still names that row after the row is moved, and after a row above it is removed.
+     A mark on a removed row blocks Save.
    - A document that the parser reads with an error keeps the text editor and nothing is written.
    Fixtures hold synthetic values only
    ([client contracts §11.5](client-contracts.md#115-test-artifacts)).
@@ -149,6 +158,12 @@ Three accepted rules bound this specification and stay as they are:
    same positions as today.
 9. **Marks.** A form field offers *Mark as secret*, which adds the field's path to the marks list. The marks
    box stays as the typed route.
+10. **Marks follow their nodes.** A mark is a position, `doc[n]` and a path, read against the text as sent
+    ([compilation §2.2](compilation.md#22-addressing)). A form edit that moves, inserts or removes a row, or a
+    document, changes positions. So before Save the page re-addresses each typed or chosen mark to the node
+    it was set on. A mark whose node was removed, or that the page cannot re-address with certainty, is shown as
+    needing the person's confirmation, and Save is refused until it is confirmed or removed. The page never
+    sends a mark that now points at another node, because the intended secret would then stay unmarked.
 
 **Profiles and assignments do not change.** They hold no Talos document: a profile pins fragment revisions
 and an assignment selects names and layers. The pin list is already a list of named rows with keyboard moves,
