@@ -14,6 +14,13 @@ import { Writes } from "./write.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// The schema is a lazy chunk, and a loaded runner takes longer to fetch it than a quiet one. Here it always arrives late, so no case
+// can pass on a fixed wait: each waits for the state it asserts (`until`).
+vi.mock("./talos-schema.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./talos-schema.ts")>();
+  return { ...real, schemaFor: async (contract: string | null | undefined) => (await new Promise((r) => setTimeout(r, 150)), real.schemaFor(contract)) };
+});
+
 const IBR = "ibr_k2pq3rstuvwxyz234567abcdef";
 const TEXT = [
   "# SYNTH-COMMENT",
@@ -73,10 +80,17 @@ describe("the imported configuration page, parsed", () => {
   const filled = () => buttons().filter((b) => !b.classList.contains("outline")).map((b) => b.textContent);
   const textarea = () => box.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]');
   const fields = () => box.querySelector<HTMLElement>('[data-testid="config-fields"]');
+  // Waits for a state, not for a time: the schema is a lazy chunk, and a loaded machine takes longer than a quiet one to fetch it.
+  const until = async (done: () => boolean) => {
+    for (let i = 0; i < 200 && !done(); i++) await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
+    expect(done()).toBe(true);
+  };
+  // The text is open and the view has left "Reading the fields.": the parsed fields or the text are drawn.
+  const shown = () => fields() !== null || textarea() !== null;
   const open = async (reads: Reads) => {
     await mount(reads);
     await click("Show imported configuration");
-    await settled();
+    await until(shown);
   };
 
   test("nothing about the cluster is read, and no schema is loaded, until the text is opened", async () => {
@@ -86,8 +100,7 @@ describe("the imported configuration page, parsed", () => {
     expect(calls.some((c) => c.startsWith("/clusters/"))).toBe(false);
     expect(calls.some((c) => c.endsWith("/document"))).toBe(false);
     await click("Show imported configuration");
-    await settled();
-    expect(calls).toContain("/clusters/cl_a");
+    await until(() => calls.includes("/clusters/cl_a"));
   });
 
   test("opened, the default view is the parsed fields: no text area, comments hidden, the notice and the one filled button as before", async () => {
@@ -158,7 +171,7 @@ describe("the imported configuration page, parsed", () => {
     expect(textarea()).toBeNull();
     for (const v of ["SYNTH-CRT-VALUE", "SYNTH-HOST", "controlplane"]) expect(box.textContent).not.toContain(v);
     await click("Show imported configuration");
-    await settled();
+    await until(shown);
     expect(fields()).not.toBeNull();
     expect(textarea()).toBeNull();
   });
