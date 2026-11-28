@@ -208,7 +208,10 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
   `BW_REQUIRE_IDP=1`, so there a missing provider fails them. CI's `idp` job runs the three
   tasks and then checks that `dev-down` left nothing; `checks` needs it.
 - **Live checks.** The provider behaviour these rest on, and its residuals, are recorded in
-  [the Zitadel test-provider record](../docs/design/research/20261022-zitadel-test-idp.md).
+  [the Zitadel test-provider record](../docs/design/research/20261022-zitadel-test-idp.md), made at
+  the earlier release. [The record of the move to the current pin](../docs/design/research/20261128-zitadel-pin-v4-20-6.md)
+  states what was repeated at it, and holds the probe that checks the login page's authenticator
+  enrollment.
 
 ## Test static host
 

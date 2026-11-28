@@ -1,0 +1,12 @@
+humans created, each with TOTP enrolled: true
+attacker: first factor only
+  after the password: /ui/v2/login/otp/time-based
+  passkey setup page /ui/v2/login/passkey/set: offers the passkey
+  result: passkey added without the second factor
+legit: first factor, then TOTP
+  after the password: /ui/v2/login/otp/time-based
+  after the TOTP code: /ui/v2/login/signedin
+  passkey setup page /ui/v2/login/passkey/set: offers the passkey
+  result: passkey added after the second factor
+RESULT expect=vulnerable attacker=[passkey added without the second factor] legit=[passkey added after the second factor] AS EXPECTED
+probe rc=0
