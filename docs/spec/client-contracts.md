@@ -2743,8 +2743,10 @@ Sources follow each item.
 
 1. The review, and an import base's text (Show imported configuration on the import base page, which the
    Open of each import entry of the draft page opens), is fetched with
-   `cache: 'no-store'`, rendered as text in a read-only element with no copy, download or print
-   action, and discarded on leaving the page, on `pagehide` and on sign-out. Those pages
+   `cache: 'no-store'`, rendered read-only with no copy, download or print action (the review as text in a
+   read-only element; an import base's text as parsed fields by default, and as the text in a read-only element
+   on *Show raw text*, section 5 of [configuration editing](configuration-editing.md)),
+   and discarded on leaving the page, on `pagehide` and on sign-out. Those pages
    offer the action to any `author` and show the server's refusal in words, as the table of §8.2 says it.
    Beside the opened text the page says that a value found there that should be hidden cannot be
    marked on this import, links the page where the machine is imported again (where Marks is
@@ -2752,7 +2754,10 @@ Sources follow each item.
    `:207-208` through `web/src/request.ts:390`; the read-only element, `web/src/claim.tsx:257`; the
    discard, `web/src/claim.tsx:116-122`, `:172`, `:222`; the action for any `author` and the refusal in
    words, `web/src/claim.tsx:190`, `:195`, `:235`, `:240`; the note and the link, `web/src/claim.tsx:258-259`,
-   shown on the import base view and not on the review view, where the marks panel stands.)
+   shown on the import base view and not on the review view, where the marks panel stands. The parsed fields:
+   `web/src/config-tree.ts` builds them from the held text and the schema of the cluster's contract,
+   `web/src/config-fields.tsx` draws them as text only with no value in an attribute, and
+   `web/src/parsed-document.ts` holds them only while the text is held, so Close, `pagehide` and sign-out drop both.)
 2. Document and marks fields set `autocomplete="off"`, `spellcheck="false"`, `autocorrect="off"` and
    `autocapitalize="off"`, so browser spelling services do not receive their text (assumption S5).
    (Built: `web/src/forms.tsx:93`, used by `web/src/imports.tsx:719`, `:733`,
@@ -2863,7 +2868,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
 | PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover; fourth case: during a continuation, the run releases the claim before its lease lapses and its draft transaction is delayed past `leaseUntil` before `COMMIT`, which the fixture's interrupt build does (`-tags fixtureinterrupt`, step `draft-commit`, action `stall`, `internal/seam`) and the default server binary cannot | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as of unknown outcome, never as not applied; a later read, `import takeover` and `import abandon` offered; in the fourth case the outcome stays unknown, the claim `held` with its lease lapsed, until a later read shows the operation `succeeded`; the read of the operation answers while the commit stalls ([#803](https://github.com/ginsys/bronzeward/issues/803)), and an `abandoned` read is unreachable on a continuation, because an encrypted claim is not due until its `expiresAt` (`internal/staging/sweep.go:13`); no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
-| PROT-07 | success, refusal | an import base's document from a file, read by the author who imported and reviewed it, then by another author; and an import read from a node, read by any `author` | the first: the text shows on request only (the CLI on a terminal, in the pager; the web in a read-only field with the notice and no copy, download or print control), is gone on leaving the page and in the pager's quit, and leaves nothing in storage or the HTTP cache; the second: `403 forbidden` with `not-the-importer`, shown as it came, with no text; the third: the text shows the same way for each author |
+| PROT-07 | success, refusal | an import base's document from a file, read by the author who imported and reviewed it, then by another author; and an import read from a node, read by any `author` | the first: the text shows on request only (the CLI on a terminal, in the pager; the web as read-only parsed fields, and in a read-only field on *Show raw text*, with the notice and no copy, download or print control), is gone on leaving the page and in the pager's quit, and leaves nothing in storage or the HTTP cache; the second: `403 forbidden` with `not-the-importer`, shown as it came, with no text; the third: the text shows the same way for each author |
 | COMP-01 | refusal | `GET /server` serves an API revision below the client's minimum | refused before any write, both revisions named; the recovery entry is the exception, since a recovery start refuses that read until its entry commits: the revision shows after the commit, the entry's success stands, and the client says that the read failed |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
 | ETAG-02 | success | edit after the client's own import succeeded; second case: another author writes between the import and the re-read | first: draft `revision` equals the import's `result.draftRevision`, the next write uses the new ETag, no `412`; second: revision is higher, treated as `412`, newer state shown |
@@ -2884,7 +2889,7 @@ one client by nature. Whether a case passes is a CI fact this change did not rea
 **Proposed**, where today differs: (a) AMB-14 has no case record in either client: its
 behaviour exists in both (web `web/src/request.ts:117-118`, CLI `internal/client/transport.go:93-95`,
 with unit tests only) and `AMB-14` appears in `conformance/` only inside the text of `PROT-06.yaml`.
-(b) PROT-07 has a web record in `web/e2e/auth/protected.e2e.ts:265` and no `conformance/cases/PROT-07.yaml`;
+(b) PROT-07 has a web record in `web/e2e/auth/protected.e2e.ts:267` and no `conformance/cases/PROT-07.yaml`;
 the CLI's behaviour exists (`cmd/bronzewardctl/importbase.go:27-76`) and is tested only by pty unit
 tests (`cmd/bronzewardctl/importbase_linux_test.go:40`), with no case against a server in
 `internal/clitest`. (c) AMB-12 runs in the web client only as the never-committed variant

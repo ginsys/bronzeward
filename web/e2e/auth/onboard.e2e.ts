@@ -118,6 +118,9 @@ describe("Connect a cluster (#1001)", () => {
     await absent(() => $('section[aria-label="Protected document"]').isExisting(), "a protected document on the draft page");
     await opens[0]!.click();
     await $('section[aria-label="Protected document"]').$("button=Show imported configuration").click();
+    // The default view is the parsed fields (an onboarded cluster's contract is the one the server renders, so it has a schema); the text is one press away.
+    await $('[data-testid="config-fields"]').waitForExist({ timeout: 20_000 });
+    await $('section[aria-label="Protected document"]').$("button=Show raw text").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     expect(await browser.execute(() => (document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "").length > 0)).toBe(true);
     await expect($('[data-testid="hide-note"]')).toHaveText(expect.stringContaining("cannot be marked on this import"));

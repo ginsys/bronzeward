@@ -198,3 +198,22 @@ td.action, th.action { text-align: right; white-space: nowrap; }
 th.action { position: relative; }
 td.action button { margin: 0; }
 .muted { color: var(--muted-foreground); }
+
+/* Config fields: the parsed read-only view of an imported configuration (docs/spec/configuration-editing.md §5, ginsys/bronzeward#1270).
+   A label, a value and a raw line may have no space to wrap at, so each wraps anywhere; below 40rem (320 px included) a label stacks over its
+   value. The global dl is a two-column box: here each item is its own row of label and value, with its help text under the value. */
+.config-fields { min-width: 0; }
+.config-fields dl { display: block; margin: 0 0 var(--s3); padding: 0; border: 0; background: none; }
+.config-fields dl > div { display: grid; grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr); gap: var(--s1) var(--s4); padding-block: var(--s1); }
+.config-fields dt, .config-fields dd, .config-fields code, .config-fields .value { min-width: 0; overflow-wrap: anywhere; }
+.config-fields dd { margin: 0; }
+.config-fields dd.help { grid-column: 2; color: var(--muted-foreground); }
+.config-fields .value { white-space: pre-wrap; }
+.config-fields pre { max-width: 100%; margin: var(--s1) 0 var(--s3); white-space: pre-wrap; overflow-wrap: anywhere; }
+.config-fields ol.rows { margin: 0; padding-inline-start: var(--s5); }
+.config-fields ul.other { margin: 0; padding: 0; list-style: none; }
+.config-fields h4, .config-fields h5, .config-fields h6 { margin-block: var(--s4) var(--s2); }
+@media (max-width: 40rem) {
+  .config-fields dl > div { grid-template-columns: minmax(0, 1fr); }
+  .config-fields dd.help { grid-column: 1; }
+}

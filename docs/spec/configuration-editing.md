@@ -319,7 +319,12 @@ declarations unchanged. The project lead files the issues after this document me
    pick the asset by the cluster's contract; say "no form" when there is none. Test: the asset's digest
    equals the module's file.
 2. **Parsed read-only display of an imported configuration**, with *Show raw text* and the hidden comments.
-   Leaves the protected-document rules and the notice unchanged.
+   Leaves the protected-document rules and the notice unchanged. *Built* in
+   [ginsys/bronzeward#1270](https://github.com/ginsys/bronzeward/issues/1270). The page reads the cluster's contract through
+   the machine's and the cluster's existing reads. A contract with no schema, a contract that cannot be read, and text
+   the parser reads with an error show the text and one sentence that says why there are no fields. One document of a
+   stream that the schema cannot place is an *Other settings* row of its raw lines, and the other documents still show
+   as fields. The API gives no declarations, so a string that holds an embedded document shows as that field's text.
 3. **Form editing of single fields in the fragment editor** (text, number, yes or no, choice) with the round-trip
    test table. Leaves the text editor, the conflict view and *Revert to base* unchanged.
 4. **Lists, maps and nested objects**, with row moves. Leaves everything in item 3 unchanged.

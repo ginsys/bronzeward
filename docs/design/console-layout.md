@@ -191,7 +191,7 @@ The top is a title, the identifier line and one line of text. The note is behind
 
 *Static proposal at 1280 px. The text is a short sample, not a real configuration.*
 
-The draft's entry for it is the single Open button of section 3.1, so the draft no longer shows the button that reads the text. The text is still read on request, as today: the image shows the page after that request. The protected-document notice shows once, as an alert inside the Protected document panel, above the text. The text area stays a read-only box, because how the configuration is shown is [ginsys/bronzeward#1234](https://github.com/ginsys/bronzeward/issues/1234)'s decision.
+The draft's entry for it is the single Open button of section 3.1, so the draft no longer shows the button that reads the text. The text is still read on request, as today: the image shows the page after that request. The protected-document notice shows once, as an alert inside the Protected document panel, above the text. The text area stays a read-only box in the image, because how the configuration is shown was [ginsys/bronzeward#1234](https://github.com/ginsys/bronzeward/issues/1234)'s decision. That decision is made and built ([ginsys/bronzeward#1270](https://github.com/ginsys/bronzeward/issues/1270)): the panel shows the parsed fields first, and the text area is what the secondary button *Show raw text* in the panel band shows.
 
 ### 3.4 How the renders were made
 

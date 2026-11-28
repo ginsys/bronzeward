@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework"]
   },
-  "include": ["."]
+  "include": [".", "../src/talos-schema-assets.d.ts"]
 }
