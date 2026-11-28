@@ -40,6 +40,31 @@ const words: Readonly<Record<NoFormReason, string>> = {
 
 export const noFormWords = (reason: NoFormReason): string => words[reason];
 
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isStrings = (v: unknown): boolean => v === undefined || (Array.isArray(v) && v.every((s) => typeof s === "string"));
+
+/**
+ * Whether a parsed file has the shape placing reads: every top-level choice is a `$ref` into a
+ * definition that exists, and each definition's apiVersion and kind lists, where it has them, are
+ * lists of strings. Anything else is no schema, so placing never meets a shape it cannot read.
+ */
+function wellFormed(s: unknown): s is JsonSchema {
+  if (!isObject(s) || !Array.isArray(s["oneOf"]) || !isObject(s["$defs"])) return false;
+  const defs = s["$defs"];
+  return s["oneOf"].every((c) => {
+    if (!isObject(c) || typeof c["$ref"] !== "string" || !c["$ref"].startsWith("#/$defs/")) return false;
+    const def = Object.hasOwn(defs, c["$ref"].slice("#/$defs/".length)) ? defs[c["$ref"].slice("#/$defs/".length)] : undefined;
+    if (!isObject(def)) return false;
+    const props = def["properties"];
+    if (props === undefined) return true;
+    if (!isObject(props)) return false;
+    return ["apiVersion", "kind"].every((k) => {
+      const p = props[k];
+      return p === undefined || (isObject(p) && isStrings(p["enum"]));
+    });
+  });
+}
+
 type Loader = () => Promise<{ readonly default: string }>;
 
 // One loader per contract that has a file, each its own chunk of the build. The keys are the file
@@ -65,10 +90,8 @@ export async function schemaFor(
   if (!Object.hasOwn(load, contract)) return { form: false, reason: "unsupported-contract", contract };
   try {
     const loader = load[contract];
-    const schema = JSON.parse((await loader!()).default) as JsonSchema;
-    if (!Array.isArray(schema.oneOf) || typeof schema.$defs !== "object" || schema.$defs === null) {
-      return { form: false, reason: "asset-missing", contract };
-    }
+    const schema: unknown = JSON.parse((await loader!()).default);
+    if (!wellFormed(schema)) return { form: false, reason: "asset-missing", contract };
     return { form: true, contract, schema };
   } catch {
     return { form: false, reason: "asset-missing", contract };
@@ -121,7 +144,9 @@ export function placeDocument(
 ): Placed | NoForm {
   const no: NoForm = { form: false, reason: "unplaceable", contract: s.contract };
   const { apiVersion, kind } = doc;
-  if (apiVersion === undefined && kind === undefined) {
+  // Key presence, not value: a key that holds undefined is still a discriminator key, so the
+  // document is a half pair and not the legacy one.
+  if (!Object.hasOwn(doc, "apiVersion") && !Object.hasOwn(doc, "kind")) {
     return s.schema.oneOf.some((c) => c.$ref === `#/$defs/${legacyDef}`) && s.schema.$defs[legacyDef] !== undefined
       ? { form: true, def: legacyDef }
       : no;

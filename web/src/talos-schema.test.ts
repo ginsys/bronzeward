@@ -78,6 +78,19 @@ describe("the schema of a contract", () => {
     expect(await schemaFor("v9.9", asset(() => Promise.resolve({ default: '{"oneOf":[],"$defs":null}' })))).toEqual(missing);
   });
 
+  test.each([
+    ["a choice with no $ref", '{"oneOf":[{}],"$defs":{}}'],
+    ["a $ref that is no string", '{"oneOf":[{"$ref":5}],"$defs":{}}'],
+    ["a $ref outside $defs", '{"oneOf":[{"$ref":"http://x/y"}],"$defs":{}}'],
+    ["a $ref to a definition that is not there", '{"oneOf":[{"$ref":"#/$defs/a"}],"$defs":{}}'],
+    ["a definition that is no object", '{"oneOf":[{"$ref":"#/$defs/a"}],"$defs":{"a":5}}'],
+    ["an apiVersion enum that is no list", '{"oneOf":[{"$ref":"#/$defs/a"}],"$defs":{"a":{"properties":{"apiVersion":{"enum":"v1"}}}}}'],
+    ["a kind enum with a non-string", '{"oneOf":[{"$ref":"#/$defs/a"}],"$defs":{"a":{"properties":{"kind":{"enum":[1]}}}}}'],
+  ])("a schema with %s is a missing asset, so placing never throws", async (_name, text) => {
+    const r = await schemaFor("v9.9", { "v9.9": () => Promise.resolve({ default: text }) });
+    expect(r).toEqual({ form: false, reason: "asset-missing", contract: "v9.9" });
+  });
+
   test("each reason has one sentence for the page", () => {
     const seen = new Set<string>();
     for (const r of noFormReasons) {
@@ -137,6 +150,9 @@ describe("placing a document", () => {
     ["a kind that is no string", { apiVersion: "v1alpha1", kind: 5 }],
     ["an apiVersion that is null", { apiVersion: null, kind: "ExternalVolumeConfig" }],
     ["both keys empty", { apiVersion: "", kind: "" }],
+    ["a kind key holding undefined", { kind: undefined }],
+    ["an apiVersion key holding undefined", { apiVersion: undefined }],
+    ["both keys holding undefined", { apiVersion: undefined, kind: undefined }],
     ["the name of an inherited property", { apiVersion: "v1alpha1", kind: "constructor" }],
   ])("%s is unplaceable", async (_name, doc) => {
     const s = await form("v1.14");
