@@ -262,8 +262,17 @@ func TestAuthorityMemberInjection(t *testing.T) {
 			// The controls: an empty object, and a member the route reads, are not refused for their form
 			// (a route's own value checks may still refuse them, and that is not what is under test).
 			bodies := []string{`{}`}
-			if names := slices.Sorted(maps.Keys(real)); len(names) > 0 {
-				bodies = append(bodies, `{"`+names[0]+`":null}`)
+			for _, name := range slices.Sorted(maps.Keys(real)) {
+				// A member whose type decodes itself (a document) refuses null by its own rule: not this control's.
+				ft := real[name]
+				for ft.Kind() == reflect.Pointer {
+					ft = ft.Elem()
+				}
+				if pt := reflect.PointerTo(ft); pt.Implements(jsonUnmarshaler) || pt.Implements(textUnmarshaler) {
+					continue
+				}
+				bodies = append(bodies, `{"`+name+`":null}`)
+				break
 			}
 			for _, body := range bodies {
 				ctl := a.send(rt, call{token: tok, body: body})
