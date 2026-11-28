@@ -68,8 +68,10 @@ Three accepted rules bound the proposal and stay as they are:
   `github.com/siderolabs/talos/pkg/machinery` at v1.14.5 it is the file `config/schemas/config.schema.json`.
   Read from the module archive on 28 November 2026: 483,234 bytes, JSON Schema draft 2020-12, 167 type
   definitions, 89 document kinds in its top-level choice, 896 descriptions and 205 lists of allowed values.
-  The module generates it from its own types and embeds it with `go:embed`, so the compiler already carries it.
-  The same file is in the upstream repository at the tag v1.14.5, and the two have the same SHA-256 digest.
+  The module generates it from its own types (a `go:generate` line in `config/config.go`) and ships it in
+  the module archive. Only one of the module's tests embeds it, so the compiler does not carry it as a
+  run-time asset: the web build copies the file out of the pinned module. The same file is in the upstream
+  repository at the tag v1.14.5, and the two have the same SHA-256 digest.
 - **Which version.** The version in use is the cluster's contract, for example `v1.14`. The cluster record
   holds it and the compiler pins it to the running minor of the nodes
   ([compilation §10.2](compilation.md#102-pinning-and-refusals)). The list of supported contracts holds
@@ -111,7 +113,7 @@ Three accepted rules bound the proposal and stay as they are:
    unchanged by construction, and the tests of item 6 prove it. A case that cannot be written this way
    is shown as *Other settings* and is edited as text. Save sends the edited text through the existing
    write. The form sends no new request and adds no field to the body. Whether the parser's recorded
-   positions are enough for every field kind is measured in build item 4, not assumed here.
+   positions are enough for every field kind is measured in build item 3, not assumed here.
 4. **What the form cannot show** stays in the text and shows as an *Other settings* row with the raw lines:
    a key that is not in the schema, a choice the form cannot resolve, a `$patch` directive, an anchor or
    alias, a tag other than the reference tag, a comment, an embedded document, a value of another type than
@@ -164,10 +166,12 @@ a use of the parsed display of section 5 and is not part of this proposal.
   as a value. A value that nobody marked can still be in the stored text
   ([operator experience §9](operator-experience.md#9-secret-handling-in-the-clients)); the notice stays, and the
   parsed view makes no claim that it is clear of one.
-- The same parsed view serves the fragment revision pages, read-only, with their own display rules.
-  It does not touch the draft render and per-field provenance of
+- The fragment revision pages are outside this proposal. Their accepted display (the text in a `pre`, with its
+  notice, [operator experience §12](operator-experience.md#12-alternatives-and-recommendations), choice C8)
+  stays as it is; a parsed view there would amend that choice, and the owner can ask for it later.
+- This proposal does not touch the draft render and per-field provenance of
   [ginsys/bronzeward#336](https://github.com/ginsys/bronzeward/issues/336). That item can use the same tree
-  later. This proposal decides nothing about it, nor about the assisted proposals of
+  later. It decides nothing about it, nor about the assisted proposals of
   [ginsys/bronzeward#919](https://github.com/ginsys/bronzeward/issues/919).
 
 ## 6. Where a form sits in the console layout
@@ -185,10 +189,10 @@ the owner makes to one. It redesigns nothing in the layout: it only says where t
   In text mode the same button reads *Edit as fields*. The layer list sits at the top of the panel body.
 - **The primary action.** The page keeps one filled button, *Publish this draft*, in the page header. *Save*
   is the form's one action, at the end of the panel body, and so is drawn as a secondary (outlined) button.
-  *Revert to base* is secondary beside it. *Remove* is the outlined red button at the end of the panel,
-  with one sentence above it, as the one confirmation pattern says. The layout design wants a destructive
-  button "never next to the primary"; *Save* is not the primary, so *Remove* may stand beside it, and the owner
-  can ask for a separate panel instead.
+  *Revert to base* is secondary beside it. *Remove* is not in the editor panel. As a destructive action it
+  follows the layout design: an outlined red button, alone in a panel of its own at the end of the page, with
+  one sentence above it that names the entry, as the one confirmation pattern says. The panel for
+  *Discard this draft* is the same kind of panel.
 - **The free-text fallback.** The *Other settings* group is the last group of the panel, under the fields. The
   text editor opens in the same panel in place of the fields, with the references table and the embedded
   documents table below it, as today. Nothing opens in a second place, and the page does not need a second column.
@@ -254,7 +258,7 @@ objects. Everything else is *Other settings*.
 ## 9. What is not built
 
 - No change to the API, the stored text, the compiler, marks, declarations or the command-line client.
-- No form for profiles or assignments.
+- No form for profiles or assignments, and no change to the fragment revision pages.
 - No Bronzeward schema of its own, no translation of a field between Talos versions, no automatic move of
   marks or declarations to a new contract.
 - No value check beyond what the schema states; the compiler and Talos still validate at publication.
@@ -274,11 +278,10 @@ unchanged. None is filed until the owner accepts this proposal.
    Test: the asset's digest equals the module's file.
 2. **Parsed read-only display of an imported configuration**, with *Show raw text* and the hidden comments.
    Leaves the protected-document rules and the notice unchanged.
-3. **The same display on fragment revision pages.** Leaves their display rules unchanged.
-4. **Form editing of single fields in the fragment editor** (text, number, yes or no, choice) with the round-trip
+3. **Form editing of single fields in the fragment editor** (text, number, yes or no, choice) with the round-trip
    test table. Leaves the text editor, the conflict view and *Revert to base* unchanged.
-5. **Lists, maps and nested objects**, with row moves. Leaves everything in item 4 unchanged.
-6. **The reference control for secret fields**, with the declaration written in the same save, and
+4. **Lists, maps and nested objects**, with row moves. Leaves everything in item 3 unchanged.
+5. **The reference control for secret fields**, with the declaration written in the same save, and
    *Mark as secret* on a field.
-7. **Go to the problem** from a refusal into a field. Leaves the text positions unchanged.
-8. **Amend choice C3** and the sentence of operator experience section 6, after the owner accepts.
+6. **Go to the problem** from a refusal into a field. Leaves the text positions unchanged.
+7. **Amend choice C3** and the sentence of operator experience section 6, after the owner accepts.
