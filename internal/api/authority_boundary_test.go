@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 	"github.com/ginsys/bronzeward/internal/auth"
 )
@@ -25,19 +27,33 @@ import (
 // otherwise authorized for the route, so a role denial cannot hide a missing member check, and each
 // refusal is followed by a read of the rows that must not have moved.
 
-// authorityTables are the tables a refused request must leave as they were: acts and idempotency
-// records, principals, drafts, ingestion claims, operations, plans, approvals and their timeline.
-var authorityTables = []string{"act", "idempotency_record", "principal", "identity_revocation", "draft", "staging_claim",
-	"operation", "plan", "plan_state", "approval", "approval_revocation", "machine_event", "machine_state"}
-
-// authorityState is a count and a digest of every row of each authorityTables table.
+// authorityState is a count and a digest of every row of every table of the schema: a refused
+// request must leave all of them as they were, the installation state and the epochs, the acts and
+// idempotency records, principals, drafts, ingestion claims and their events, operations, plans,
+// approvals and the machines' timeline included. The set is read from the database, so a table a
+// later migration adds is covered without an edit here.
 func authorityState(t *testing.T, db *sql.DB) map[string]string {
 	t.Helper()
 	got := map[string]string{}
-	for _, tb := range authorityTables {
+	rows, err := db.Query(`SELECT tablename FROM pg_tables WHERE schemaname = current_schema() ORDER BY 1`)
+	if err != nil {
+		fatalf(t, "%v", err)
+		return got
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			fatalf(t, "%v", err)
+			return got
+		}
+		names = append(names, n)
+	}
+	rows.Close()
+	for _, tb := range names {
 		var n int
 		var sum sql.NullString
-		if err := db.QueryRow(`SELECT count(*), md5(string_agg(x::text, '|' ORDER BY x::text)) FROM `+tb+` x`).Scan(&n, &sum); err != nil {
+		if err := db.QueryRow(`SELECT count(*), md5(string_agg(x::text, '|' ORDER BY x::text)) FROM `+pgx.Identifier{tb}.Sanitize()+` x`).Scan(&n, &sum); err != nil {
 			fatalf(t, "%s: %v", tb, err)
 			return got
 		}
@@ -50,9 +66,30 @@ func authorityState(t *testing.T, db *sql.DB) map[string]string {
 func wantSameState(t *testing.T, db *sql.DB, before map[string]string, what string) {
 	t.Helper()
 	after := authorityState(t, db)
-	for _, tb := range authorityTables {
-		if before[tb] != after[tb] {
-			t.Errorf("%s changed %s: %s, then %s", what, tb, before[tb], after[tb])
+	for tb, v := range after {
+		if before[tb] != v {
+			t.Errorf("%s changed %s: %s, then %s", what, tb, before[tb], v)
+		}
+	}
+}
+
+// The state read's own control: it holds the tables that carry epoch, ingestion, plan and approval
+// authority, and a row written to one of them moves its digest.
+func TestAuthorityStateReadsTheAuthorityTables(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, options{})
+	before := authorityState(t, e.db)
+	for _, tb := range []string{"installation_state", "recovery_epoch", "operation", "operation_event", "staging_claim", "plan",
+		"plan_state", "approval", "approval_revocation", "act", "idempotency_record", "principal", "machine_event"} {
+		if _, ok := before[tb]; !ok {
+			t.Errorf("the state read holds no table %s", tb)
+		}
+	}
+	newEpoch(t, e.db)
+	after := authorityState(t, e.db)
+	for _, tb := range []string{"installation_state", "recovery_epoch"} {
+		if before[tb] == after[tb] {
+			t.Errorf("a new epoch did not move the digest of %s", tb)
 		}
 	}
 }
@@ -222,23 +259,45 @@ func TestAuthorityMemberInjection(t *testing.T) {
 				sent++
 			}
 			wantSameState(t, a.db, before, "the refused injections")
-			// The control: a member the route reads, or none, passes the body's shape checks.
-			body := `{}`
+			// The controls: an empty object, and a member the route reads, are not refused for their form
+			// (a route's own value checks may still refuse them, and that is not what is under test).
+			bodies := []string{`{}`}
 			if names := slices.Sorted(maps.Keys(real)); len(names) > 0 {
-				body = `{"` + names[0] + `":null}`
+				bodies = append(bodies, `{"`+names[0]+`":null}`)
 			}
-			ctl := a.send(rt, call{token: tok, body: body})
-			if d := detailOf(decodeAny(ctl)); strings.Contains(d, "unknown member") || strings.Contains(d, "differently cased") || ctl.Code == http.StatusForbidden {
-				t.Errorf("control %s: %d %s", body, ctl.Code, ctl.Body)
+			for _, body := range bodies {
+				ctl := a.send(rt, call{token: tok, body: body})
+				wantFormAccepted(t, "control "+body, ctl)
+				t.Logf("%s %s: control %s answered %d", rt.method, rt.pattern, body, ctl.Code)
 			}
 			total += sent
-			t.Logf("%s %s: %d refused, rows unchanged; control %s answered %d", rt.method, rt.pattern, sent, body, ctl.Code)
+			t.Logf("%s %s: %d refused, rows unchanged", rt.method, rt.pattern, sent)
 		})
 	}
 	if total == 0 {
 		t.Fatal("no injection was sent")
 	}
 	t.Logf("%d injections refused over %d routes", total, len(bodyRoutes()))
+}
+
+// formRefusals are the details with which the request layer refuses a request's form: its members,
+// its query, its body and its content type, never a value or a state.
+var formRefusals = []string{"unknown member", "differently cased", "given twice", "this route takes no body", "takes no query",
+	"the one query is scope", "the body must be one JSON object", "Content-Type must be", "the body could not be read"}
+
+// wantFormAccepted fails when rec refuses the request for its form or its credential. A refusal of
+// a value or a state (a missing resource, a failed check of a member) is left to the route.
+func wantFormAccepted(t *testing.T, what string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
+		t.Errorf("%s: %d %s", what, rec.Code, rec.Body)
+	}
+	d := detailOf(decodeAny(rec))
+	for _, s := range formRefusals {
+		if strings.Contains(d, s) {
+			t.Errorf("%s: refused for its form, %d %q", what, rec.Code, d)
+		}
+	}
 }
 
 // decodeAny is the answer's problem document, or nil for an answer that is not one.
@@ -284,11 +343,11 @@ func TestAuthorityQueryAndNoBody(t *testing.T) {
 				}
 			}
 			wantSameState(t, a.db, before, "the refused queries and bodies")
-			if rt.scoped { // the control: the one query a scoped route takes
-				ctl := a.send(rt, call{token: tok, path: routePath(rt.pattern) + "?scope=cluster", body: body})
-				if d := detailOf(decodeAny(ctl)); strings.Contains(d, "query") || ctl.Code == http.StatusForbidden {
-					t.Errorf("control ?scope=cluster: %d %s", ctl.Code, ctl.Body)
-				}
+			// The controls: the route's own form, with no query (and no body on a no-body route), and the
+			// one query a scoped route takes, are not refused for their form.
+			wantFormAccepted(t, "control with no query", a.send(rt, call{token: tok, body: body}))
+			if rt.scoped {
+				wantFormAccepted(t, "control ?scope=cluster", a.send(rt, call{token: tok, path: routePath(rt.pattern) + "?scope=cluster", body: body}))
 			}
 		})
 	}
@@ -545,27 +604,57 @@ func TestAuthorityIngestionOwnership(t *testing.T) {
 	if claims, ops := ie.rowCounts(t); claims != 0 || ops != 0 {
 		t.Fatalf("%d claims and %d operations after refused starts", claims, ops)
 	}
-	op, j, first := ie.pausedForContinue(t)
-	claimPath := prefix + "/ingestions/" + j.claim.ID
-	same := func(what string) {
+	bodies := []string{`{"owner":"pr_x"}`, `{"generation":5}`, `{"ownerGeneration":5}`, `{"controller":"pr_x"}`, `{"owner":null}`,
+		`{"principal":"pr_x","role":"recovery-admin"}`}
+	refuseAll := func(claim, sub string) {
 		t.Helper()
-		r := ie.pausedRow(t, j.claim.ID)
-		if r.state != first.state || r.review != first.review || r.gen != first.gen || r.owner != first.owner || r.opState != first.opState ||
-			r.opGen != first.opGen || r.opOwner != first.opOwner || string(r.digest) != string(first.digest) {
-			t.Errorf("%s: claim %s, was %s", what, r, first)
+		for _, body := range bodies {
+			refused(sub+" with "+body, call{method: "POST", path: prefix + "/ingestions/" + claim + sub, token: author, body: body})
 		}
 	}
+	owners := func(claim string) (owner string, gen int64) {
+		t.Helper()
+		if err := ie.db.QueryRow(`SELECT owner, owner_gen FROM staging_claim WHERE id = $1`, claim).Scan(&owner, &gen); err != nil {
+			t.Fatal(err)
+		}
+		return owner, gen
+	}
+
+	// A paused claim: every route's refused bodies leave it, its operation and every other row as they were,
+	// and the continuation then takes it at the next generation, as the serving process.
+	op, j, first := ie.pausedForContinue(t)
 	for _, sub := range []string{"/continuations", "/takeovers", "/abandonments"} {
-		for _, body := range []string{`{"owner":"pr_x"}`, `{"generation":5}`, `{"ownerGeneration":5}`, `{"controller":"pr_x"}`, `{"owner":null}`,
-			`{"principal":"pr_x","role":"recovery-admin"}`} {
-			refused(sub+" with "+body, call{method: "POST", path: claimPath + sub, token: author, body: body})
-			same(sub + " with " + body)
-		}
+		refuseAll(j.claim.ID, sub)
 	}
-	// The control: a continuation by the author takes the claim at the next generation, as the serving process.
+	if r := ie.pausedRow(t, j.claim.ID); r.state != first.state || r.review != first.review || r.gen != first.gen || r.owner != first.owner ||
+		r.opState != first.opState || r.opGen != first.opGen || r.opOwner != first.opOwner || string(r.digest) != string(first.digest) {
+		t.Errorf("after the refusals: claim %s, was %s", r, first)
+	}
 	ie.continueReview(t, "k-continue-authority-1", j.claim.ID, op, 2)
-	r := ie.pausedRow(t, j.claim.ID)
-	if r.state != "held" || r.gen != 2 || r.owner != ie.d.owner.ID || r.opOwner != ie.d.owner.ID || r.opGen != 2 {
-		t.Fatalf("after the continuation: claim %s, owner %q, operation owner %q; want held at generation 2 owned by %q", r, r.owner, r.opOwner, ie.d.owner.ID)
+	if o, g := owners(j.claim.ID); o != ie.d.owner.ID || g != 2 {
+		t.Fatalf("after the continuation the claim is owned by %q at generation %d; want %q at 2", o, g, ie.d.owner.ID)
+	}
+	// The same claim, live, is abandoned by its author's request: the refused bodies change nothing, and the abandonment
+	// is the author's own act.
+	refuseAll(j.claim.ID, "/abandonments")
+	b := decode[map[string]any](t, ie.do(ie.api, abandonCall(author, "k-abandon-authority-1", j.claim.ID)), http.StatusOK)
+	if b["state"] != "abandoned" || b["id"] != j.claim.ID {
+		t.Fatalf("the abandonment answered %v", b)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM act WHERE action = 'ingestion.abandon' AND principal = $1 AND role = 'author'`, ie.principalOf("h-author")); n != 1 {
+		t.Fatalf("%d abandonment acts of the author", n)
+	}
+
+	// A staged claim whose lease lapsed is the one a takeover is for: the refused bodies leave it held at its generation,
+	// and the taker's takeover owns it under the taker's own owner string, at the next generation.
+	opT, jt := ie.stagedJob(t)
+	refuseAll(jt.claim.ID, "/takeovers")
+	if o, g := owners(jt.claim.ID); g != 1 || o != ie.d.owner.ID {
+		t.Fatalf("after the refusals the staged claim is owned by %q at generation %d", o, g)
+	}
+	tk := ie.newTaker(options{})
+	ie.takeOver(t, tk, "k-takeover-authority-1", jt.claim.ID, opT, 2)
+	if o, g := owners(jt.claim.ID); o != tk.d.owner.ID || g != 2 {
+		t.Fatalf("after the takeover the claim is owned by %q at generation %d; want %q at 2", o, g, tk.d.owner.ID)
 	}
 }
