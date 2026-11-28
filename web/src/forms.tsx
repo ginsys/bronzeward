@@ -7,7 +7,7 @@ import type { components } from "./api/v1";
 import { type Dropped, type Listed, type Load, Ref, short, useList, usePending, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { RequestRef } from "./problems.tsx";
-import { Action, useOffline } from "./shell.tsx";
+import { Action, useOffline, type Variant } from "./shell.tsx";
 import type { Problem } from "./request.ts";
 import { CHECK_STATE, CUT_OFF, problemSentences, Refused, Repeated, REPLAYED, SetAside, Status, unknown, Unknown } from "./states.tsx";
 import { PageNote } from "./page-note.tsx";
@@ -398,11 +398,11 @@ export function RenameMachine({ machine, onChanged }: { machine: Machine; onChan
 }
 
 // The list pages' entries to the forms.
-export const AddClusterAction = () => {
+export const AddClusterAction = ({ variant }: { variant?: Variant } = {}) => {
   const { go } = useReads();
-  return <Action label={ENTER_A_CLUSTER_BY_HAND} needs={["author"]} onClick={() => go("/clusters/new")} />;
+  return <Action label={ENTER_A_CLUSTER_BY_HAND} needs={["author"]} onClick={() => go("/clusters/new")} {...(variant !== undefined && { variant })} />;
 };
-export const RecordMachineAction = ({ cluster }: { cluster: string }) => {
+export const RecordMachineAction = ({ cluster, variant }: { cluster: string; variant?: Variant }) => {
   const { go } = useReads();
-  return <Action label={ADD_MACHINE} needs={["author"]} onClick={() => go(cluster === "" ? "/machines/new" : `/machines/new?${new URLSearchParams({ cluster })}`)} />;
+  return <Action label={ADD_MACHINE} needs={["author"]} onClick={() => go(cluster === "" ? "/machines/new" : `/machines/new?${new URLSearchParams({ cluster })}`)} {...(variant !== undefined && { variant })} />;
 };

@@ -8,7 +8,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
 import { type Discovery, type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
-import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
+import { Action, KEPT_PAGE, useGate, type Variant } from "./shell.tsx";
 import { MachineById, Named } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { useUnsaved, useWrites } from "./forms.tsx";
@@ -19,9 +19,9 @@ import { CONNECT_A_CLUSTER, CONNECT_NOTE, CONNECT_STEP_ONE, CONNECT_STEP_TWO, CO
 const MAX_FILE = 512 * 1024;
 const HELD = "the talosconfig chosen for onboarding";
 
-export const OnboardClusterAction = () => {
+export const OnboardClusterAction = ({ variant }: { variant?: Variant } = {}) => {
   const { go } = useReads();
-  return <Action label={CONNECT_A_CLUSTER} needs={["author"]} onClick={() => go("/clusters/onboard")} />;
+  return <Action label={CONNECT_A_CLUSTER} needs={["author"]} onClick={() => go("/clusters/onboard")} {...(variant !== undefined && { variant })} />;
 };
 
 // One member of the discovered cluster. The address is not a server-set word (A8 rule 6 names it as not covered).

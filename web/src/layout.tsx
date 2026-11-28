@@ -1,7 +1,7 @@
 // The layout blocks of the console layout design (docs/design/console-layout.md §2, ginsys/bronzeward#1255): a panel with a titled
 // band, a page header with the page's actions, and a note drawn as one visible line with the whole note behind a native
-// disclosure. The action variants are Action's (shell.tsx). The draft page is the only page that uses them so far; the stylesheet
-// is app.css, "Console layout blocks".
+// disclosure. The action variants are Action's (shell.tsx). The draft page, the cluster page, the Clusters and Machines lists and the
+// operation page use them so far (ginsys/bronzeward#1257); the stylesheet is app.css, "Console layout blocks".
 
 import type { ReactNode } from "react";
 import { PageNote } from "./page-note.tsx";
@@ -37,7 +37,9 @@ export function PageHead({ heading, actions, children }: { heading: ReactNode; a
 
 // A page's note as one line and the whole note behind "What is this page?". The line is written from the page's own sentences
 // (`firstSentence`, `lastSentence`), never new wording; the whole note is PageNote's, with the same parts and the same test id.
+// A note that is one sentence is its own line: the disclosure would only repeat it, so it is drawn as the plain page note.
 export function Note({ line, parts }: { line: string; parts: readonly (string | false | undefined)[] }) {
+  if (parts.filter((p): p is string => typeof p === "string").join(" ") === line) return <PageNote parts={parts} />;
   return (
     <>
       <p className="lede" data-testid="page-note-line">{line}</p>
