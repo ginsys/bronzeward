@@ -1043,7 +1043,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     hold({ ...held, declared: next });
   };
   return (
-    <section className="panel" aria-label={`Fragment ${called || "(new)"}`}>
+    <section className="editor" aria-label={`Fragment ${called || "(new)"}`}>
       <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : called}{shared && ` (${SHARED_LIBRARY})`}</h3>
       {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => setSharedNew(e.target.checked)} /> {SHARED_CHOICE}</label></p>}
       <p>

@@ -189,8 +189,9 @@ describe("the entry's editor opens as a panel directly under Entries", () => {
     await act(async () => void [...box.querySelectorAll("button")].find((b) => b.textContent === "Add fragment")!.click());
     const editor = box.querySelector('section[aria-label="Fragment (new)"]')!;
     expect(panel("Entries").nextElementSibling).toBe(editor);
-    // The editor is a panel: Oat's panel rule draws its heading as the titled band (app.css, `.panel > h3`).
-    expect(editor.className).toBe("panel");
+    // The editor is drawn as a panel by its own rule (app.css, `section.editor`), not by `.panel`: that rule puts a margin on every child,
+    // which sideways-scrolls the page at 320 px under a field as wide as its parent.
+    expect(editor.className).toBe("editor");
     expect(editor.querySelector(":scope > h3")).not.toBeNull();
     before(editor, panel("Shared names"));
   });

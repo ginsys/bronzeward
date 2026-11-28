@@ -136,8 +136,10 @@ pre.diff { overflow: auto; max-width: 100%; }
 /* Console layout blocks (docs/design/console-layout.md §2.9, ginsys/bronzeward#1255): the page header, the panel band with actions,
    the reading width, the action hierarchy and the table helpers. Only the draft page uses them so far. */
 /* Reading width */
-main p, main dd { max-width: 72ch; }
-main .alert p, main .panel-head p { max-width: none; }
+/* Scoped to a page that has the page header, so a page that does not use the blocks yet keeps its text width (the design's
+   rule is for every page; each page takes it when it is built to the blocks). */
+main:has(.page-head) p, main:has(.page-head) dd { max-width: 72ch; }
+main:has(.page-head) .alert p, main:has(.page-head) .panel-head p { max-width: none; }
 
 /* Page header, note */
 .page-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s3) var(--s5); margin: 0 0 var(--s3); }
@@ -180,9 +182,18 @@ a.button:hover { color: var(--primary-foreground); }
 a.button.outline { --_hov: #1c2333; }
 a.button.outline:hover { color: var(--foreground); }
 
+/* An entry's editor (fragment, profile, assignment) drawn as a panel under Entries. Its content keeps the width it had: the box pads
+   instead of putting a margin on each child, because a field that is as wide as its parent plus a margin sideways-scrolls the page at
+   320 px (the .panel rule above puts a margin on every child). The title is the band, running to the box's edges. */
+section.editor { margin: 0 0 var(--s5); padding: 0 var(--s4) var(--s4); background-color: var(--card); border: 1px solid var(--border); border-radius: 0.375rem; }
+section.editor > h3 { margin: 0 calc(var(--s4) * -1) var(--s4); padding: var(--s3) var(--s4); background-color: var(--muted); border-bottom: 1px solid var(--border); border-radius: 0.375rem 0.375rem 0 0; font-size: 1rem; }
+
 /* Table */
 tbody th[scope="row"] { color: var(--foreground); }
 tbody tr:last-child th { border-bottom: 0; }
 td.action, th.action { text-align: right; white-space: nowrap; }
+/* The action column's hidden header word is absolutely positioned (.sr-only): with no positioned ancestor it sits where it would flow, at the
+   right end of a wide table, outside the scroll region's clip, and scrolls the page sideways. The cell is its containing block. */
+th.action { position: relative; }
 td.action button { margin: 0; }
 .muted { color: var(--muted-foreground); }
