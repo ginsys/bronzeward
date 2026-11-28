@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Usage: run/test2 <a|c> <build|api|rest>
+# Usage: run/test2 <a|c> <build|api|rest|goldens>
 # Test 2: build one variant under a new temporary directory, which is left in place, and run there
-#   build  go build ./... and go vet ./..., both even when the first fails
-#   api    the tests of internal/api
-#   rest   the tests of every other package
+#   build    go build ./... and go vet ./..., both even when the first fails
+#   api      the tests of internal/api
+#   rest     the tests of every other package
+#   goldens  the three clitest tests whose golden files name the machinery version
 # The tests need the PostgreSQL and OpenBao the go-db job profile starts. The export is not a git
 # checkout, so a failure counts against the patch only when variant a, the base in the same form,
 # does not show it too.
 set -euo pipefail
 
-[ $# -eq 2 ] || { echo "usage: $0 <a|c> <build|api|rest>" >&2; exit 2; }
+[ $# -eq 2 ] || { echo "usage: $0 <a|c> <build|api|rest|goldens>" >&2; exit 2; }
 here=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/talos114-test.XXXXXX")
 "$here/run/build" "$1" "$work/src"
@@ -33,6 +34,15 @@ rest)
 	mapfile -t packages < <(grep -v '/internal/api\(/\|$\)' <<<"$all")
 	echo "== packages: ${#packages[@]}"
 	go test -p 1 -timeout 40m "${packages[@]}"
+	;;
+goldens)
+	# The three journey transcripts name the machinery version. Variant c rewrites that one
+	# string in the export only, so a pass shows the version string was the whole difference.
+	if [ "$1" = c ]; then
+		sed -i 's/machinery v1\.14\.5/machinery v1.14.7/g' internal/clitest/testdata/journeys/t3.txt \
+			internal/clitest/testdata/journeys/t8.txt internal/clitest/testdata/journeys/t10.txt
+	fi
+	go test -p 1 -timeout 40m -run 'TestApprovals|TestDrift|TestProtected' ./internal/clitest/
 	;;
 *)
 	echo "$0: unknown set $2" >&2
