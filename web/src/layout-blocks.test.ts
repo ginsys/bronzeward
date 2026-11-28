@@ -130,9 +130,23 @@ describe("the sentences a page's visible line is built from", () => {
 describe("the stylesheet", () => {
   const css = readFileSync(`${import.meta.dirname}/app.css`, "utf8");
   test("carries the blocks of the layout design, section 2.9, and the one extra rule for a link drawn as a button", () => {
-    for (const rule of [".page-head {", ".panel-head {", "details.about {", "button.outline { --_hov: #1c2333; }", 'button.outline[data-variant="danger"] { --_hov: #2b1a20; }', "a.button {", "a.button:active { transform: none; }", "button:active:not(:disabled) { transform: none; }", "td.action, th.action {", "main p, main dd { max-width: 72ch; }"]) {
+    for (const rule of [".page-head {", ".panel-head {", "details.about {", "button.outline { --_hov: #1c2333; }", 'button.outline[data-variant="danger"] { --_hov: #2b1a20; }', "a.button {", "a.button:active { transform: none; }", "button:active:not(:disabled) { transform: none; }", "td.action, th.action {", "main:has(.page-head) p, main:has(.page-head) dd { max-width: 72ch; }", "section.editor {"]) {
       expect(css, rule).toContain(rule);
     }
+  });
+  test("the reading width is scoped to a page that has the page header, so no other page's text changes width (the advisory review of the first push)", () => {
+    expect(css).not.toMatch(/^main p, main dd \{/m);
+    expect(css).not.toMatch(/^main \.alert p/m);
+  });
+  test("the action column's hidden header word has a positioned cell, so a wide table cannot push it outside the scroll region and scroll the page sideways at 320 px", () => {
+    // Measured in headless Chrome at 320 px on the page's own markup: without this rule the page scrolled sideways by 655 px (a long name widens the table).
+    expect(css).toContain("th.action { position: relative; }");
+    expect(css).toMatch(/\.sr-only \{ position: absolute;/);
+  });
+  test("an editor draws its box by padding and has no margin rule on its children, so a field as wide as its parent cannot scroll the page sideways", () => {
+    const rule = css.split("\n").find((l) => l.startsWith("section.editor {"))!;
+    expect(rule).toContain("padding: 0 var(--s4) var(--s4)");
+    expect(css).not.toMatch(/section\.editor > :not/);
   });
   test("adds no colour beyond the two hover values of the design: no new hex colour besides #1c2333 and #2b1a20 in the layout block", () => {
     // Comments are not colours: an issue reference like #1255 reads as one.

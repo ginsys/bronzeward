@@ -277,7 +277,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   );
   const pending = usePending(fragments, "fragments");
   return (
-    <section className="panel" aria-label={`Profile ${called || "(new)"}`}>
+    <section className="editor" aria-label={`Profile ${called || "(new)"}`}>
       <h3>Profile{entry === undefined && shared && ` (${SHARED_LIBRARY})`} {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : <>{called}{shared && ` (${SHARED_LIBRARY})`}</>}</h3>
       {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => { setSharedNew(e.target.checked); hold([]); }} /> {SHARED_CHOICE}</label></p>}
       <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " (unsaved)"}</p>
@@ -748,7 +748,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const chooseable = machineOffers(draft, machines.kind === "ok" ? machines.data.items : []);
   const sharedOffers = sharedAddresses(chooseable);
   return (
-    <section className="panel" aria-label={`Assignment ${called}`}>
+    <section className="editor" aria-label={`Assignment ${called}`}>
       <h3>
         Assignment{" "}
         {entry === undefined ? (
