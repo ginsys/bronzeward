@@ -19,7 +19,7 @@ import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
-import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending, useReads } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
@@ -33,7 +33,7 @@ import { startedBy } from "./operation-words.ts";
 import { safeText, safeWord } from "./safe.ts";
 import { alertSentence, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
-import { firstSentence, Note, PageHead } from "./layout.tsx";
+import { firstSentence, ListHead, Note, PageHead, Panel } from "./layout.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
@@ -67,8 +67,9 @@ export function Rows<T>({ label, cols, items, keyOf }: { label: string; cols: re
 const byId = (t: unknown) => (t as { id: string }).id;
 
 // A list read a page at a time, with its empty text and, above the table, what the last page adds.
-function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }: {
-  label: string; path: string; query?: string; cols: readonly Col<T>[]; empty: ReactNode; keyOf?: (t: T) => string; head?: (l: Listed<T>) => ReactNode;
+// `secondary` draws Show more as the outline button, for a page whose one filled button is its own (the console layout, §2.3).
+function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head, secondary = false }: {
+  label: string; path: string; query?: string; cols: readonly Col<T>[]; empty: ReactNode; keyOf?: (t: T) => string; head?: (l: Listed<T>) => ReactNode; secondary?: boolean;
 }) {
   const [list, more, busy] = useList<T>(path, query, false);
   const pending = usePending(list, label.toLowerCase());
@@ -78,7 +79,7 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }:
     <>
       {head?.(list.data)}
       {items.length === 0 && more === undefined ? <EmptyList list={list.data} text={empty} /> : (
-        <><Rows label={label} cols={cols} items={items} keyOf={keyOf} /><More list={list.data} shown={items.length} more={more} busy={busy} /></>
+        <><Rows label={label} cols={cols} items={items} keyOf={keyOf} /><More list={list.data} shown={items.length} more={more} busy={busy} secondary={secondary} /></>
       )}
     </>
   );
@@ -220,20 +221,25 @@ export function Sources({ query, go }: { query: string; go: (to: string) => void
   const cls = q.get("class") ?? "";
   return (
     <>
-      <h2>{FRAGMENTS_AND_PROFILES}</h2>
-      <PageNote parts={[SOURCES_NOTE]} />
-      <h3>Fragments</h3>
-      <ListOf label="Fragments" path="/fragments" cols={FRAGMENTS} empty={<NoSources kind="fragment" />} />
-      <h3>Profiles</h3>
-      <ListOf label="Profiles" path="/profiles" cols={PROFILES} empty={<NoSources kind="profile" />} />
-      <h3>Assignments</h3>
-      <ListOf label="Assignments" path="/assignments" cols={ASSIGNMENTS} empty="No assignments recorded yet." />
-      <h3>Dependencies</h3>
-      <Filter label="Class:" value={cls} options={choices(DEPENDENCY_CLASSES)} onChange={(v) => set("class", v)} />
-      <ListOf label="Dependencies" path="/dependencies" query={sent(["class"])} cols={DEPENDENCIES} head={lastPass}
-        empty={cls === "" ? "No dependencies monitored yet." : "No dependency of this class."} />
-      <h3>Dependency alerts</h3>
-      <ListOf label="Dependency alerts" path="/dependency-alerts" cols={ALERTS} empty="No dependency alerts raised." />
+      <ListHead heading={FRAGMENTS_AND_PROFILES} note={SOURCES_NOTE} />
+      {/* Each panel's name differs from its table region's, so a screen reader never meets two regions of one name. */}
+      <Panel title="Fragments" label="The fragment list">
+        <ListOf label="Fragments" path="/fragments" cols={FRAGMENTS} empty={<NoSources kind="fragment" />} />
+      </Panel>
+      <Panel title="Profiles" label="The profile list">
+        <ListOf label="Profiles" path="/profiles" cols={PROFILES} empty={<NoSources kind="profile" />} />
+      </Panel>
+      <Panel title="Assignments" label="The assignment list">
+        <ListOf label="Assignments" path="/assignments" cols={ASSIGNMENTS} empty="No assignments recorded yet." />
+      </Panel>
+      <Panel title="Dependencies" label="The dependency list">
+        <div className="toolbar"><Filter label="Class:" value={cls} options={choices(DEPENDENCY_CLASSES)} onChange={(v) => set("class", v)} /></div>
+        <ListOf label="Dependencies" path="/dependencies" query={sent(["class"])} cols={DEPENDENCIES} head={lastPass}
+          empty={cls === "" ? "No dependencies monitored yet." : "No dependency of this class."} />
+      </Panel>
+      <Panel title="Dependency alerts" label="The dependency alert list">
+        <ListOf label="Dependency alerts" path="/dependency-alerts" cols={ALERTS} empty="No dependency alerts raised." />
+      </Panel>
     </>
   );
 }
@@ -416,28 +422,32 @@ export function Imports({ query, go }: { query: string; go: (to: string) => void
   const { q, set, sent } = useFilters("/ingestions", query, go);
   return (
     <>
-      <h2>Imports</h2>
-      <PageNote parts={[IMPORTS_NOTE]} />
-      <p><Action label="Start import" needs={["author"]} onClick={() => go(q.has("machine") ? `/ingestions/new?machine=${q.get("machine")}` : "/ingestions/new")} /></p>
-      <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
-      <Filter label="State:" value={q.get("state") ?? ""} options={choices(INGESTION_STATES)} onChange={(v) => set("state", v)} />
-      <ListOf label="Imports" path="/ingestions" query={sent(["state", "machine"])} cols={INGESTIONS}
-        empty={q.size === 0 ? "No imports recorded yet." : "No import matches this filter."} />
+      <ListHead heading="Imports" note={IMPORTS_NOTE}
+        actions={<Action label="Start import" needs={["author"]} onClick={() => go(q.has("machine") ? `/ingestions/new?machine=${q.get("machine")}` : "/ingestions/new")} />} />
+      <Panel title="Imports" label="The import list">
+        <div className="toolbar">
+          <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
+          <Filter label="State:" value={q.get("state") ?? ""} options={choices(INGESTION_STATES)} onChange={(v) => set("state", v)} />
+        </div>
+        <ListOf label="Imports" path="/ingestions" query={sent(["state", "machine"])} cols={INGESTIONS} secondary
+          empty={q.size === 0 ? "No imports recorded yet." : "No import matches this filter."} />
+      </Panel>
     </>
   );
 }
 
 // The Drafts and releases page: drafts (#339) and the imports into them, then releases.
+// The page's one filled button is Create draft, in the page header; the Imports line stays between the two lists, where the note says it is.
 export function Changes() {
+  const { go } = useReads();
   return (
     <>
-      <h2>{DRAFTS_AND_RELEASES}</h2>
-      <PageNote parts={[CHANGES_NOTE]} />
-      <h3>Drafts</h3>
-      <Drafts />
+      <ListHead heading={DRAFTS_AND_RELEASES} note={CHANGES_NOTE} actions={<Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} />} />
+      <Panel title="Drafts" label="The draft list"><Drafts /></Panel>
       <p><Ref to="/ingestions" id="ingestions">Imports</Ref>, of every machine.</p>
-      <h3>Releases</h3>
-      <ListOf label="Releases" path="/releases" cols={RELEASES} empty="No releases published yet." />
+      <Panel title="Releases" label="The release list">
+        <ListOf label="Releases" path="/releases" cols={RELEASES} empty="No releases published yet." secondary />
+      </Panel>
     </>
   );
 }
@@ -522,11 +532,14 @@ export function Plans({ query, go }: { query: string; go: (to: string) => void }
   const { q, set, sent } = useFilters("/plans", query, go);
   return (
     <>
-      <h2>Plans</h2>
-      <PageNote parts={[PLANS_NOTE]}> <Ref to="/machines" id="machines">{OPEN_A_MACHINE}</Ref> {PLANS_NOTE_END}</PageNote>
-      <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
-      <Filter label="State:" value={q.get("state") ?? ""} options={choices(PLAN_STATES)} onChange={(v) => set("state", v)} />
-      <ListOf label="Plans" path="/plans" query={sent(["state", "machine"])} cols={PLANS} empty={q.size === 0 ? "No plans created yet." : "No plan matches this filter."} />
+      <ListHead heading="Plans" note={PLANS_NOTE}> <Ref to="/machines" id="machines">{OPEN_A_MACHINE}</Ref> {PLANS_NOTE_END}</ListHead>
+      <Panel title="Plans" label="The plan list">
+        <div className="toolbar">
+          <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
+          <Filter label="State:" value={q.get("state") ?? ""} options={choices(PLAN_STATES)} onChange={(v) => set("state", v)} />
+        </div>
+        <ListOf label="Plans" path="/plans" query={sent(["state", "machine"])} cols={PLANS} empty={q.size === 0 ? "No plans created yet." : "No plan matches this filter."} />
+      </Panel>
     </>
   );
 }
@@ -598,14 +611,17 @@ export function Operations({ query, go }: { query: string; go: (to: string) => v
   const { q, set, sent } = useFilters("/operations", query, go);
   return (
     <>
-      <h2>Operations</h2>
-      <PageNote parts={[OPERATIONS_NOTE]} />
-      <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
-      <Pinned label="Plan" id={q.get("plan")} clear={() => set("plan", "")} />
-      <Filter label="Kind:" value={q.get("kind") ?? ""} options={choices(OPERATION_KINDS)} onChange={(v) => set("kind", v)} />
-      <Filter label="State:" value={q.get("state") ?? ""} options={choices(OPERATION_STATES)} onChange={(v) => set("state", v)} />
-      <ListOf label="Operations" path="/operations" query={sent(["plan", "machine", "state", "kind"])} cols={OPERATIONS}
-        empty={q.size === 0 ? "No operations recorded yet." : "No operation matches this filter."} />
+      <ListHead heading="Operations" note={OPERATIONS_NOTE} />
+      <Panel title="Operations" label="The operation list">
+        <div className="toolbar">
+          <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
+          <Pinned label="Plan" id={q.get("plan")} clear={() => set("plan", "")} />
+          <Filter label="Kind:" value={q.get("kind") ?? ""} options={choices(OPERATION_KINDS)} onChange={(v) => set("kind", v)} />
+          <Filter label="State:" value={q.get("state") ?? ""} options={choices(OPERATION_STATES)} onChange={(v) => set("state", v)} />
+        </div>
+        <ListOf label="Operations" path="/operations" query={sent(["plan", "machine", "state", "kind"])} cols={OPERATIONS}
+          empty={q.size === 0 ? "No operations recorded yet." : "No operation matches this filter."} />
+      </Panel>
     </>
   );
 }
@@ -660,7 +676,12 @@ export const ACTS: readonly Col<S["ActItem"]>[] = [
 ];
 
 export function Audit() {
-  return <><h2>Audit</h2><PageNote parts={[AUDIT_NOTE]} /><ListOf label="Acts" path="/acts" cols={ACTS} empty="No acts recorded yet." /></>;
+  return (
+    <>
+      <ListHead heading="Audit" note={AUDIT_NOTE} />
+      <Panel title="Acts" label="The act list"><ListOf label="Acts" path="/acts" cols={ACTS} empty="No acts recorded yet." /></Panel>
+    </>
+  );
 }
 
 const DEPENDENT: readonly Col<S["DependencyReleaseBody"]>[] = [

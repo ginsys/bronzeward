@@ -12,7 +12,7 @@ import { NO_ETAG } from "./handover.ts";
 import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
 import { firstSentence, lastSentence, Note, Panel } from "./layout.tsx";
-import { IdentifierText, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
+import { IdentifierText, type Load, Ref, Scroll, short, useItem, useList, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
@@ -167,8 +167,8 @@ export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragme
 export const inUseShared = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile") => draft.entries.some((e) => isSource(e) && isShared(e) && e.kind === kind && nameOf(e) === name);
 
 // The Drafts and releases page's drafts, every page read, filtered by cluster in the browser (#339 scope).
+// Its Cluster filter is the toolbar row of the panel the page puts it in; Create draft is the page header's (Changes).
 export function Drafts() {
-  const { go } = useReads();
   const [list] = useList<Draft>("/drafts", "", true);
   const [cluster, setCluster] = useState("");
   const pending = usePending(list, "drafts");
@@ -177,15 +177,14 @@ export function Drafts() {
   const shown = items.filter((d) => cluster === "" || d.cluster === cluster);
   return (
     <>
-      <p>
+      <div className="toolbar">
         <label>Cluster:{" "}
           <select value={cluster} onChange={(e) => setCluster(e.target.value)}>
             <option value="">all</option>
             {clusters.map((c) => <ClusterOption key={c} id={c} />)}
           </select>
-        </label>{" "}
-        <Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} />
-      </p>
+        </label>
+      </div>
       {pending ?? (shown.length === 0 ? <Status>No drafts{cluster === "" ? "" : " in this cluster"}.</Status> : (
         <Scroll label="Drafts">
           <thead><tr>{["Draft", "Cluster", "State", "Revision", "Identifier"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
