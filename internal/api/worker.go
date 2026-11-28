@@ -203,8 +203,9 @@ func (a *API) runPublish(ctx context.Context, j publishJob) {
 
 // buildFault is an error of the publication build that is a pure function of stored data: every
 // claim of the job would meet it again (the stored source ingestion refuses, the stored mode, the
-// node-name claim, the machine's records, the build's machinery record). The database, the clock,
-// the context and the providers raise untyped errors, which keep the job to its lease.
+// node-name claim, the machine's records, the build's machinery record). The database, the clock
+// and the context raise untyped errors, as does a provider error that is no refusal; they keep the
+// job to its lease.
 type buildFault struct{ err error }
 
 func (f *buildFault) Error() string { return f.err.Error() }
