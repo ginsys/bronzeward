@@ -47,16 +47,14 @@ type entry struct {
 	Tokens
 }
 
-// load reads the stored sign-in, nil when there is none. A credential store that fails is
-// treated as none: the sign-in then lasts for this process only.
+// load reads the stored sign-in, nil when there is none. A credential store that answers and then
+// fails is an error, not an empty store: nothing is issued that cannot be kept (§9.2 item 3), so
+// the command stops before a sign-in starts, whatever its --no-input. The cause stays wrapped, so
+// that errors.Is still sees its kind.
 func (s *store) load() (*Tokens, error) {
-	if s.file != "" || s.none != "" {
-		return s.read()
-	}
 	t, err := s.read()
-	if err != nil && !errors.Is(err, ErrNotTokenFile) {
-		s.none = "the credential store failed: " + err.Error()
-		return nil, nil
+	if err != nil && s.file == "" && !errors.Is(err, ErrNotTokenFile) {
+		return nil, fmt.Errorf("the system credential store failed, so no sign-in was started: %w", err)
 	}
 	return t, err
 }

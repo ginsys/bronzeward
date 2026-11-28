@@ -146,7 +146,9 @@ In this order:
 2. **The system credential store**: the Secret Service (for example GNOME Keyring or KWallet) on
    Linux, and the Keychain on macOS. No other system's store is supported yet.
 3. **This process's memory only.** When neither exists, you sign in again for every command.
-   The client says so, with the reason.
+   The client says so, with the reason. A credential store that exists and fails is not "neither":
+   every command stops with the store's error before a sign-in starts, with or without
+   `--no-input`, until the store works or the context has a token file.
 
 With `--no-input` the client never opens a locked credential store's unlock prompt: a locked
 store is refused.

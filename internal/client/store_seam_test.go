@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,9 +203,10 @@ func TestNoInputNeverPrompts(t *testing.T) {
 	}
 	prompting.Store(0)
 	refused.Store(0)
-	if _, err := openSignIn(&x, true, io.Discard); err == nil ||
-		!strings.Contains(err.Error(), "the system credential store is locked") || !strings.Contains(err.Error(), "--no-input forbids") {
-		t.Errorf("a command with --no-input on a locked store: %v, want it refused, naming the locked store", err)
+	if _, err := openSignIn(&x, true, io.Discard); !errors.Is(err, errStoreLocked) ||
+		!strings.Contains(err.Error(), "the system credential store failed, so no sign-in was started: the system credential store is locked") ||
+		strings.Contains(err.Error(), "--no-input forbids") {
+		t.Errorf("a command with --no-input on a locked store: %v, want it refused as a failed store, naming the locked store", err)
 	}
 	if _, err := SignOut(&x, true); !errors.Is(err, errStoreLocked) {
 		t.Errorf("logout --no-input on a locked store: %v, want errStoreLocked", err)
@@ -231,6 +234,84 @@ func TestNoInputNeverPrompts(t *testing.T) {
 			t.Errorf("context remove (--no-input %v) without an oidc section: %v, %d deletions; want the entry removed",
 				noInput, err, writes.Load())
 		}
+	}
+}
+
+// TestStoreFailureStopsBeforeSignIn checks that a credential store that fails stops a command before
+// any sign-in starts, with or without --no-input (client-contracts.md §9.2 item 3,
+// ginsys/bronzeward#1240): the error names the store and its cause, and the identity provider, a
+// server that counts its requests, is never asked. The controls: a store that works opens, an empty
+// one says nothing is stored, and a refresh-only entry keeps its own refusal.
+func TestStoreFailureStopsBeforeSignIn(t *testing.T) {
+	get, getHeld := keyringGetCall, keyringGetHeldCall
+	t.Cleanup(func() { keyringGetCall, keyringGetHeldCall = get, getHeld })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
+	var requests atomic.Int32
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(idp.Close)
+	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: idp.URL, ClientID: "BWSYNTH-cli"}}
+	answer := func(v string, err error) {
+		keyringGetCall = func(string, string) (string, error) { return v, err }
+		keyringGetHeldCall = keyringGetCall
+	}
+	stored := func(t Tokens) string {
+		b, err := json.Marshal(entry{Server: x.Server, Issuer: x.OIDC.Issuer, Tokens: t})
+		if err != nil {
+			panic(err)
+		}
+		return string(b)
+	}
+
+	const stopped = "the system credential store failed, so no sign-in was started: "
+	for _, c := range []struct {
+		name string
+		err  error
+	}{
+		{"does not answer", errors.New("BWSYNTH-no-answer")},
+		{"locked", errStoreLocked},
+		{"entry unreadable", errEntryUnreadable},
+		{"name refused", errNameRefused},
+	} {
+		for _, noInput := range []bool{false, true} {
+			answer("", c.err)
+			_, err := openSignIn(&x, noInput, io.Discard)
+			switch {
+			case err == nil, !errors.Is(err, c.err), !strings.HasPrefix(err.Error(), stopped+c.err.Error()):
+				t.Errorf("a store that is %s (--no-input %v): %v; want %q and its cause", c.name, noInput, err, stopped)
+			case strings.Contains(err.Error(), "memory") || strings.Contains(err.Error(), "--no-input forbids"):
+				t.Errorf("a store that is %s (--no-input %v): %v; want no sign-in kept in memory and none refused for --no-input", c.name, noInput, err)
+			}
+		}
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("%d requests reached the identity provider after a store failed, want none", n)
+	}
+
+	before := requests.Load()
+	for _, noInput := range []bool{false, true} {
+		answer(stored(Tokens{AccessToken: "BWSYNTH-at", RefreshToken: "BWSYNTH-rt"}), nil)
+		if s, err := openSignIn(&x, noInput, io.Discard); err != nil || s.tokens.AccessToken != "BWSYNTH-at" {
+			t.Errorf("a store that holds the sign-in (--no-input %v): %v, want it opened", noInput, err)
+		}
+		answer("", keyring.ErrNotFound)
+		if _, err := openSignIn(&x, noInput, io.Discard); err == nil || !strings.Contains(err.Error(), "not signed in: nothing is stored in the system credential store") {
+			t.Errorf("an empty store (--no-input %v): %v, want it said that nothing is stored", noInput, err)
+		}
+		answer(stored(Tokens{RefreshToken: "BWSYNTH-rt"}), nil)
+		if _, err := openSignIn(&x, noInput, io.Discard); !errors.Is(err, ErrNotTokenFile) || strings.Contains(err.Error(), stopped) {
+			t.Errorf("an entry with no access token (--no-input %v): %v, want its own refusal, not a failed store", noInput, err)
+		}
+	}
+	if n := requests.Load() - before; n != 0 {
+		t.Errorf("%d requests reached the identity provider in the controls, want none", n)
 	}
 }
 
