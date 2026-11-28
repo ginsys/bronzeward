@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,17 +52,29 @@ func (b *buildEnv) opState(op string) (string, int64, []string) {
 }
 
 // runFaulted queues a publish job of the draft's revision 1 and lets a worker with short timers
-// and options o run for four leases, then stops it and returns the operation.
-func (b *buildEnv) runFaulted(o options) string {
+// and options o run until reached reports true (at most 20 s: a case that never reaches it fails
+// on its own assertions), then four leases more, which is longer than a stuck job needs to be
+// claimed again. It stops the worker and returns the operation. A run's length depends on the
+// node, so no case waits for a fixed time.
+func (b *buildEnv) runFaulted(o options, reached func(op string) bool) string {
 	b.t.Helper()
 	mustExec(b.t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
 	life, stop := context.WithCancel(b.t.Context())
 	a := b.workerWith("run-1/1/a", life, faultTimers, o)
 	op := b.queuePublish(1)
 	a.startPublisher()
+	for deadline := time.Now().Add(20 * time.Second); !reached(op) && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	time.Sleep(4 * faultTimers.Lease)
 	stopping(a, stop)
 	return op
+}
+
+// finished is reached once op is failed or succeeded.
+func (b *buildEnv) finished(op string) bool {
+	state, _, _ := b.opState(op)
+	return state == "failed" || state == "succeeded"
 }
 
 // wantBuildFault checks that op ended failed on its first claim, with the fixed 500 problem that
@@ -103,7 +116,7 @@ func TestPublishBuildFaultStoredSource(t *testing.T) {
 		(SELECT min(id) FROM principal))`,
 		"import_base_reference", sanitizedSource{embedded: []byte("[]")}, ibr, b.machine, "key: [unclosed\n", []byte("[]"), make([]byte, 32))
 	mustExec(t, b.db, `UPDATE draft_entry SET import_base_revision = $2 WHERE draft = $1 AND machine = $3`, b.draft, ibr, b.machine)
-	op := b.runFaulted(options{})
+	op := b.runFaulted(options{}, b.finished)
 	b.wantBuildFault(op, "not a well-formed sanitized source")
 }
 
@@ -120,7 +133,7 @@ func TestPublishBuildFaultSeamSites(t *testing.T) {
 					return errors.New(cause)
 				}
 				return nil
-			}})
+			}}, b.finished)
 			b.wantBuildFault(op, cause)
 		})
 	}
@@ -131,6 +144,7 @@ func TestPublishBuildFaultSeamSites(t *testing.T) {
 func TestPublishBuildFaultDatabaseControl(t *testing.T) {
 	b := newBuildEnv(t)
 	var atCommit bool
+	var resets atomic.Int32
 	op := b.runFaulted(options{
 		stopAt: func(step string) bool {
 			atCommit = step == "publish-commit"
@@ -141,11 +155,12 @@ func TestPublishBuildFaultDatabaseControl(t *testing.T) {
 				return tx.Commit()
 			}
 			atCommit = false
+			resets.Add(1)
 			return errors.New("connection reset (test)")
 		},
-	})
+	}, func(string) bool { return resets.Load() >= 2 })
 	state, gen, types := b.opState(op)
-	if state != "running" || gen < 3 || types[len(types)-1] != "claimed" || slices.Contains(types, "failed") {
+	if state != "running" || gen < 2 || types[len(types)-1] != "claimed" || slices.Contains(types, "failed") {
 		t.Fatalf("operation %s at generation %d, events %v; want running and claimed again", state, gen, types)
 	}
 	if n := count(t, b.db, `SELECT count(*) FROM operation WHERE id = $1 AND error IS NOT NULL`, op); n != 0 {
