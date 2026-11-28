@@ -777,12 +777,17 @@ describe("the read-only lists and items", () => {
       await loaded();
       expect(["the cluster", await overflows()]).toEqual(["the cluster", 0]);
       // The lists that are not read through an item below (built to the console layout blocks, ginsys/bronzeward#1259): the page header, the
-      // toolbar row and the panels must not widen the page either.
-      for (const page of ["Drafts and releases", "Imports", "Audit"]) {
+      // toolbar row and the panels must not widen the page either. Imports has no navigation link: it is the link on Drafts and releases.
+      for (const page of ["Drafts and releases", "Audit"]) {
         await nav(page);
         await loaded();
         expect([page, await overflows()]).toEqual([page, 0]);
       }
+      await nav("Drafts and releases");
+      await $("main").$("a=Imports").click();
+      await expect($("main h2")).toHaveText("Imports");
+      await loaded();
+      expect(["Imports", await overflows()]).toEqual(["Imports", 0]);
       for (const [page, item, title] of [["Plans", s.plan.id, "Plan"], ["Fragments and profiles", s.frg.id, "Fragment"], ["Operations", s.op.id, "Operation"]] as const) {
         await nav(page);
         await loaded();
