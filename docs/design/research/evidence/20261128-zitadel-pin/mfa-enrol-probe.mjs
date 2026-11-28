@@ -107,7 +107,7 @@ async function setupPage(browser, u) {
 }
 const added = async (u) => (await methods(u)).includes("AUTHENTICATION_METHOD_TYPE_PASSKEY");
 
-let attacker = "unknown", legit = "unknown";
+let attacker = "unknown", legit = "unknown", failed = false;
 try {
   const a = await human(`h-mfa-a-${randomBytes(2).toString("hex")}`);
   const l = await human(`h-mfa-l-${randomBytes(2).toString("hex")}`);
@@ -143,12 +143,14 @@ try {
   } finally { await browser.deleteSession(); }
   out(`  result: ${legit}`);
 } catch (e) {
+  failed = true;
   out(`failed: ${e.message}`);
 } finally {
   rmSync(profile, { recursive: true, force: true });
 }
-// Anything but the two named outcomes is inconclusive and fails, whatever the expectation.
-const ok = legit === "passkey added after the second factor" &&
+// Anything but the two named outcomes is inconclusive and fails, whatever the expectation, and so
+// does any error caught on the way, including one from closing a browser after both outcomes were read.
+const ok = !failed && legit === "passkey added after the second factor" &&
   attacker === (expect === "fixed" ? "refused, no passkey added" : "passkey added without the second factor");
 out(`RESULT expect=${expect} attacker=[${attacker}] legit=[${legit}] ${ok ? "AS EXPECTED" : "NOT AS EXPECTED"}`);
 process.exit(ok ? 0 : 1);
