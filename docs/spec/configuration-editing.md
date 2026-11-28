@@ -324,7 +324,8 @@ declarations unchanged. The project lead files the issues after this document me
    the machine's and the cluster's existing reads. A contract with no schema, a contract that cannot be read, and text
    the parser reads with an error show the text and one sentence that says why there are no fields. One document of a
    stream that the schema cannot place is an *Other settings* row of its raw lines, and the other documents still show
-   as fields. The API gives no declarations, so a string that holds an embedded document shows as that field's text.
+   as fields. The raw lines of an *Other settings* row leave out comments, as the default view does; *Show raw text*
+   keeps them. The API gives no declarations, so a string that holds an embedded document shows as that field's text.
 3. **Form editing of single fields in the fragment editor** (text, number, yes or no, choice) with the round-trip
    test table. Leaves the text editor, the conflict view and *Revert to base* unchanged.
 4. **Lists, maps and nested objects**, with row moves. Leaves everything in item 3 unchanged.
