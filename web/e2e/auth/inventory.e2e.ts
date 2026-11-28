@@ -766,6 +766,13 @@ describe("the read-only lists and items", () => {
       // The clusters are a read of their own: measure once the long option is in the filter.
       await expect($(`main option[value="${cl.id}"]`)).toHaveElementProperty("text", long);
       expect(["machines", await overflows()]).toEqual(["machines", 0]);
+      // A machine's page (built to the console layout blocks, ginsys/bronzeward#1263), by the link of its row: the page header's four links
+      // wrap under the title, and the panels, the forms and the tables must not widen the page.
+      await $(`a[title="${m}"]`).click();
+      await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
+      await expect($("main").$("h3=Timeline (newest first)")).toBeDisplayed({ wait: 20_000 });
+      await loaded();
+      expect(["the machine", await overflows()]).toEqual(["the machine", 0]);
       // The Clusters list and a cluster's page (built to the console layout blocks, ginsys/bronzeward#1257): the panels, the Details grid
       // and the page header's actions must not widen the page either.
       await nav("Clusters");

@@ -10,8 +10,8 @@ import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef, Named, useReleaseNames } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
-import { PageNote } from "./page-note.tsx";
-import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
+import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, NAME_THIS_MACHINE, RELEASE_NOT_APPLIED_YET, RENAME_MACHINE, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
 import { HostWaits, hostRefusalNode } from "./host-waits.tsx";
 import { NextStep, PlanPreparedBy, type Position } from "./nextstep.tsx";
 import { driftPath } from "./plan.tsx";
@@ -453,35 +453,41 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
   const list = read === undefined ? [] : byBasis(read.items);
   return (
     <>
-      <h2>{machineHeading(d)}</h2>
-      <Detail id={d.id} />
-      <PageNote parts={[MACHINE_NOTE]}> <Ref to="/drafts/new" id="drafts">{CREATE_A_DRAFT}</Ref>.</PageNote>
+      <PageHead heading={machineHeading(d)} actions={(
+        <>
+          <Ref to={`/plans?machine=${d.id}`} id={d.id} button="outline">Plans for this machine</Ref>
+          <Ref to={`/operations?machine=${d.id}`} id={d.id} button="outline">Operations on this machine</Ref>
+          <Ref to={`/ingestions?machine=${d.id}`} id={d.id} button="outline">Imports of this machine</Ref>
+          <Ref to={`/ingestions/new?machine=${d.id}`} id={d.id} button="outline">Import this machine</Ref>
+        </>
+      )}><Detail id={d.id} secondary /></PageHead>
+      <Note line={firstSentence(MACHINE_NOTE)} parts={[MACHINE_NOTE]}> <Ref to="/drafts/new" id="drafts">{CREATE_A_DRAFT}</Ref>.</Note>
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
-      <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {safeWord(d.platform)}{d.role !== null && d.role !== undefined && <>, {safeWord(roleWords(d.role))}</>}.</p>
-      {changed !== undefined && <RenameMachine machine={d} onChanged={changed} />}
-      {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
-      <ul aria-label="Status" data-testid="sentences">{sentences(d, list, name).map((s) => <li key={s}>{s}</li>)}</ul>
-      <p data-testid="drift-link"><Ref to={driftPath(d.id)} id={d.id}>{driftLinkText(d)}</Ref></p>
-      <NextStep position={position} recovery={recovery} />
-      <HostWaits position={position} />
-      <PlanPreparedBy position={position} />
-      <dl>
-        <dt>Desired</dt><dd>{release(d.desired)}</dd>
-        <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {safeWord(d.applied.source)}</>}</dd>
-        <dt>Import base</dt><dd data-testid="import-base"><Id id={d.applied?.importBase} none="none" /></dd>
-        <dt>Observed</dt><dd data-testid="observed">{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>): {attribution(d.observed.release)}</>}</dd>
-        <dt>Scope</dt><dd>{safeWord(d.scopeState)}</dd>
-      </dl>
-      <p>
-        <Ref to={`/plans?machine=${d.id}`} id={d.id}>Plans for this machine</Ref>{" · "}
-        <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>{" · "}
-        <Ref to={`/ingestions?machine=${d.id}`} id={d.id}>Imports of this machine</Ref>{" · "}
-        <Ref to={`/ingestions/new?machine=${d.id}`} id={d.id}>Import this machine</Ref>
-      </p>
-      {read !== undefined && <><h3>Observations</h3><Observations read={{ ...read, restarted: ko.restarted }} /></>}
-      <h3>Timeline (newest first)</h3>
-      {tl.kind !== "ok" ? timeline : <TimelineRows tl={{ ...tl.data, restarted: kt.restarted }} older={older} busy={busy} />}
+      {/* Each panel's name differs from its table region's or its list's, so a screen reader never meets two regions of one name. */}
+      <Panel title="Status" label="Machine status">
+        <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {safeWord(d.platform)}{d.role !== null && d.role !== undefined && <>, {safeWord(roleWords(d.role))}</>}.</p>
+        <ul aria-label="Status" data-testid="sentences">{sentences(d, list, name).map((s) => <li key={s}>{s}</li>)}</ul>
+        <p data-testid="drift-link"><Ref to={driftPath(d.id)} id={d.id}>{driftLinkText(d)}</Ref></p>
+        <NextStep position={position} recovery={recovery} />
+        <HostWaits position={position} />
+        <PlanPreparedBy position={position} />
+      </Panel>
+      <Panel title="Details" label="Machine details">
+        <dl>
+          <dt>Desired</dt><dd>{release(d.desired)}</dd>
+          <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {safeWord(d.applied.source)}</>}</dd>
+          <dt>Import base</dt><dd data-testid="import-base"><Id id={d.applied?.importBase} none="none" /></dd>
+          <dt>Observed</dt><dd data-testid="observed">{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>): {attribution(d.observed.release)}</>}</dd>
+          <dt>Scope</dt><dd>{safeWord(d.scopeState)}</dd>
+        </dl>
+      </Panel>
+      {read !== undefined && <Panel title="Observations" label="Observations list"><Observations read={{ ...read, restarted: ko.restarted }} /></Panel>}
+      <Panel title="Timeline (newest first)" label="Machine timeline">
+        {tl.kind !== "ok" ? timeline : <TimelineRows tl={{ ...tl.data, restarted: kt.restarted }} older={older} busy={busy} />}
+      </Panel>
+      {changed !== undefined && <Panel title={machineName(d.name) === undefined ? NAME_THIS_MACHINE : RENAME_MACHINE} label="Machine name"><RenameMachine machine={d} onChanged={changed} /></Panel>}
+      {changed !== undefined && <Panel title="Change endpoint" label="Endpoint change"><ChangeEndpoint machine={d} onChanged={changed} /></Panel>}
     </>
   );
 }

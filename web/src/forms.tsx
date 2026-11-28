@@ -228,7 +228,9 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
   }
 }
 
-export function Form({ title, label, onSubmit, w, done, children }: { title?: string; label: string; onSubmit: (data: FormData) => void; w: Write | undefined; done: (data: unknown) => ReactNode; children: ReactNode }) {
+// `variant` is how the submit button looks (the console layout's action hierarchy, §2.3); a form is drawn as the page's one filled button unless its
+// page already has one, as the machine page's two forms do not.
+export function Form({ title, label, onSubmit, w, done, children, variant }: { title?: string; label: string; onSubmit: (data: FormData) => void; w: Write | undefined; done: (data: unknown) => ReactNode; children: ReactNode; variant?: Variant }) {
   const writes = useWrites()!;
   const held = w !== undefined && writes.open.includes(w);
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -238,7 +240,7 @@ export function Form({ title, label, onSubmit, w, done, children }: { title?: st
   return (
     <form onSubmit={submit} aria-label={title ?? label}>
       {children}
-      <p><Action label={label} needs={["author"]} submit busy={held} /></p>
+      <p><Action label={label} needs={["author"]} submit busy={held} {...(variant !== undefined && { variant })} /></p>
       <Result w={w} done={done} />
     </form>
   );
@@ -349,7 +351,7 @@ export function ChangeEndpoint({ machine, onChanged }: { machine: Machine; onCha
     return <>Endpoint changed from {c.previousEndpoint} to {c.talosEndpoint} (revision {c.revision}).</>;
   };
   return (
-    <Form title="Change endpoint" label="Change endpoint" onSubmit={submit} w={w} done={done}>
+    <Form title="Change endpoint" label="Change endpoint" onSubmit={submit} w={w} done={done} variant="secondary">
       <Text label="Talos endpoint:" name="talosEndpoint" value={machine.talosEndpoint} />
     </Form>
   );
@@ -386,7 +388,7 @@ export function RenameMachine({ machine, onChanged }: { machine: Machine; onChan
   const holder = outcome?.kind === "refused" && outcome.problem?.type === "urn:bronzeward:problem:name-in-use" ? outcome.problem["machine"] : undefined;
   return (
     <>
-      <Form title={label} label={label} onSubmit={submit} w={w} done={done}>
+      <Form title={label} label={label} onSubmit={submit} w={w} done={done} variant="secondary">
         {/* Keyed by the machine's name: a name changed elsewhere, or by this form, replaces the field's text. */}
         <Text key={current ?? ""} label="Name:" name="name" hint={NAME_HINT} value={current ?? ""} />
       </Form>

@@ -15,7 +15,7 @@ import { Withheld } from "./states.tsx";
 import { Named, useBody, useReleaseNames, useReleaseTitle } from "./titles.tsx";
 import { type Applied, HostnameLines } from "./hostname.tsx";
 import { safeWord } from "./safe.ts";
-import { PageNote } from "./page-note.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
 
 type S = components["schemas"];
@@ -127,8 +127,7 @@ const keyOf = (r: Prov) => `${r.reference}@${r.version}:${r.member ?? ""}:${r.so
 
 function Provenance({ records }: { records: readonly Prov[] }) {
   return (
-    <>
-      <h3>Provenance (secret references only)</h3>
+    <Panel title="Provenance (secret references only)">
       {records.length === 0 ? <p>{NO_PROVENANCE}</p> : (
         <Scroll label="Provenance" testid="provenance">
           <Head cols={COLS} />
@@ -146,7 +145,7 @@ function Provenance({ records }: { records: readonly Prov[] }) {
         </Scroll>
       )}
       <p>{PROVENANCE_LIMIT}</p>
-    </>
+    </Panel>
   );
 }
 
@@ -177,14 +176,18 @@ export function appliedHostname(pos: Load<Position>, release: S["ReleaseBody"] |
 export function ReviewBody({ r, machine, applied = { state: "pending" } }: { r: Review; machine?: MachineLike; applied?: Applied }) {
   return (
     <>
-      {r.configuration !== null && <PageNote parts={[REVIEW_NOTE]} />}
-      <dl>
-        <dt>Release</dt><dd><Named id={r.release} /></dd>
-        <dt>Machine</dt><dd>{viewOf(r.machine) !== "machines" ? <Id id={r.machine} /> : <Ref to={`/machines/${encodeURIComponent(r.machine)}`} id={r.machine}>{machine === undefined ? undefined : machineText(machine)}</Ref>}</dd>
-        <dt>Validated in mode</dt><dd>{safeWord(r.mode)}</dd>
-      </dl>
-      <HostnameLines hostname={r.hostname} applied={applied} current={machine?.name === undefined ? undefined : typeof machine.name === "string" ? machine.name : null} />
-      {r.configuration === null ? <Withheld /> : <><Document configuration={r.configuration} /><p>{EMPTY_NOTE}</p></>}
+      {r.configuration !== null && <Note line={firstSentence(REVIEW_NOTE)} parts={[REVIEW_NOTE]} />}
+      <Panel title="Details">
+        <dl>
+          <dt>Release</dt><dd><Named id={r.release} /></dd>
+          <dt>Machine</dt><dd>{viewOf(r.machine) !== "machines" ? <Id id={r.machine} /> : <Ref to={`/machines/${encodeURIComponent(r.machine)}`} id={r.machine}>{machine === undefined ? undefined : machineText(machine)}</Ref>}</dd>
+          <dt>Validated in mode</dt><dd>{safeWord(r.mode)}</dd>
+        </dl>
+        <HostnameLines hostname={r.hostname} applied={applied} current={machine?.name === undefined ? undefined : typeof machine.name === "string" ? machine.name : null} />
+      </Panel>
+      <Panel title="Rendered configuration" label="The rendered configuration">
+        {r.configuration === null ? <Withheld /> : <><Document configuration={r.configuration} /><p>{EMPTY_NOTE}</p></>}
+      </Panel>
       <Provenance records={r.provenance} />
     </>
   );
@@ -234,11 +237,12 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   const applied = named ? appliedHostname(pos, was, machine) : undefined;
   return (
     <>
-      <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {releaseTitle}</h2>
-      <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
+      <PageHead heading={<>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {releaseTitle}</>}
+        actions={<Ref to={`/releases/${enc(release)}`} id={release} button="outline">Back to the release</Ref>} />
       {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} {...(applied !== undefined && { applied })} /> : pending}
-      <h3>Next step</h3>
-      <NextStepSection release={release} machine={machine} pos={pos} readAgain={() => readAgain((x) => x + 1)} />
+      <Panel title="Next step">
+        <NextStepSection release={release} machine={machine} pos={pos} readAgain={() => readAgain((x) => x + 1)} />
+      </Panel>
     </>
   );
 }
