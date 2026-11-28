@@ -1,11 +1,15 @@
 # Identity provider: Zitadel
 
-Bronzeward is a generic OIDC relying party. Zitadel is the reference provider, at the release
-[#281](https://github.com/ginsys/bronzeward/issues/281) checked live: `v4.19.5`, pinned by digest as
-`ZITADEL_IMAGE` in [`fixtures/versions.env`](../../../fixtures/versions.env). The
-[live checks](../../design/research/20261022-zitadel-test-idp.md#outcomes) are the evidence for
-every behaviour below. Another release, or another provider, needs those checks repeated. This page
-sets no credential policy: the lifetimes are yours to choose, within the limits stated.
+Bronzeward is a generic OIDC relying party. Zitadel is the reference provider. The release
+[#281](https://github.com/ginsys/bronzeward/issues/281) checked live is `v4.19.5`. The test
+provider of the fixtures now runs `v4.20.6`, pinned by digest as `ZITADEL_IMAGE` in
+[`fixtures/versions.env`](../../../fixtures/versions.env), because upstream fixed security flaws
+in its login page after `v4.19.5`. The
+[live checks](../../design/research/20261022-zitadel-test-idp.md#outcomes) of `v4.19.5` are the
+evidence for every behaviour below. [The record of the move to `v4.20.6`](../../design/research/20261128-zitadel-pin-v4-20-6.md)
+says which of them were repeated there. Another release, or another provider, needs those checks
+repeated. This page sets no credential policy: the lifetimes are yours to choose, within the limits
+stated.
 
 Host names are synthetic: the site is `https://bronzeward.example.com` and the issuer
 `https://idp.example.com`. Every value in angle brackets is your own.
