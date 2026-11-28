@@ -1,12 +1,13 @@
 # Editing and showing configuration in the web console: structured forms and a parsed display
 
-**Status: Proposal, not accepted by the owner.** It answers
+**Status: accepted by the owner on option A, on 28 November 2026 at 10:49 CET** (answer on the status
+page; [section 8](#8-decisions-and-questions)). It answers
 [ginsys/bronzeward#1234](https://github.com/ginsys/bronzeward/issues/1234). It specifies no code and
-changes no page. The owner accepts it, changes it or rejects it before any build item starts.
+changes no page. Issues for the build items are filed after this document merges.
 
 It changes the web console only. The API, the stored documents, the compiler and the command-line
-client stay as they are. Where this proposal differs from an accepted text, [section 2](#2-what-this-changes-in-the-accepted-text)
-says so.
+client stay as they are. Where this specification differs from an earlier accepted text,
+[section 2](#2-what-this-changes-in-the-accepted-text) says so.
 
 ## 1. What a person meets today
 
@@ -20,7 +21,8 @@ The facts below were read in the web client and the specifications at `origin/ma
 - **A profile is not a text box.** A profile is an ordered list of pinned fragment revisions. The
   profile editor already shows it as a list of fragment names with *Move up*, *Move down*, *Remove* and an
   *Add* list (`web/src/composition.tsx`). An assignment is a list of selections in the same way.
-  The owner's test words, "just a text box", fit the fragment only. This proposal changes neither list.
+  The owner's test words, "just a text box", describe the fragment only. This specification changes
+  neither list.
 - **An imported configuration is a read-only text area.** *Show imported configuration* reads the stored
   document on request and shows it in a read-only text area of 24 rows, under a notice that it is a
   protected document that can hold a secret nobody has recognised yet (`web/src/claim.tsx`). The page keeps
@@ -33,11 +35,13 @@ The facts below were read in the web client and the specifications at `origin/ma
 - **A refusal points into the text.** A refused save names a reference, a mark position or a path, and the
   editor selects that spot in the text area. A form must keep this: see [section 4](#4-the-editing-model).
 
-**What the owner said.** In a hands-on test on 27 November 2026 the owner called the fragment and profile
-boxes "just a text box fo json, no forms", asked for "better forms and displaying of structured config,
-not just json boxes", and said "not parsed forms" of the imported configuration. This is the first
-usability measurement of the editor. It is also the measurement that the accepted choice in section 2
-said was missing.
+**What the owner said.** In a hands-on test on 27 November 2026 the owner wrote that "Add fragment" and
+"Add profile" are "just a text box fo json, no forms", that the imported configuration shows "not parsed
+forms", and "better forms and displaying of structured config, not just json boxes". On 28 November 2026
+the owner said how to read those words: "My message, how you quote it was not a request for the design,
+but was a statement about how it is now, meaning that is wrong." So they describe the console as it is
+today, which section 1 confirms against the code, and say that it is wrong. They are the first usability
+measurement of the editor, and the measurement that the accepted choice in section 2 said was missing.
 
 ## 2. What this changes in the accepted text
 
@@ -46,12 +50,12 @@ said was missing.
 second model to keep in step with every Talos version". Its status is "accepted; usability unmeasured".
 Section 6 of the same document repeats it.
 
-This proposal asks the owner to amend C3. The amendment is the first question in
-[section 8](#8-questions-for-the-owner). The text of C3 and of that sentence stays as it is in the pull
-request that carries this proposal, because the owner has not accepted the change. The last build item
-amends them after acceptance.
+The owner decided to amend C3 on 28 November 2026 at 10:49 CET ([section 8](#8-decisions-and-questions)).
+The same change adds the amendment, with its date and the owner's words, to the status of C3 and to that
+sentence of section 6. What C3 recorded stays as it was written. Build item 7 brings the rest of the
+document in line once the forms exist.
 
-Three accepted rules bound the proposal and stay as they are:
+Three accepted rules bound this specification and stay as they are:
 
 - The configuration of a machine is native Talos configuration, and "platform metadata selects and orders
   fragments but does not redefine Talos fields" ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)).
@@ -149,7 +153,7 @@ Three accepted rules bound the proposal and stay as they are:
 **Profiles and assignments do not change.** They hold no Talos document: a profile pins fragment revisions
 and an assignment selects names and layers. The pin list is already a list of named rows with keyboard moves,
 and a Talos schema says nothing about it. A later change may show what each pinned fragment contains; that is
-a use of the parsed display of section 5 and is not part of this proposal.
+a use of the parsed display of section 5 and is not part of this specification.
 
 ## 5. Showing an imported configuration as fields
 
@@ -166,10 +170,10 @@ a use of the parsed display of section 5 and is not part of this proposal.
   as a value. A value that nobody marked can still be in the stored text
   ([operator experience §9](operator-experience.md#9-secret-handling-in-the-clients)); the notice stays, and the
   parsed view makes no claim that it is clear of one.
-- The fragment revision pages are outside this proposal. Their accepted display (the text in a `pre`, with its
+- The fragment revision pages are outside this specification. Their accepted display (the text in a `pre`, with its
   notice, [operator experience §12](operator-experience.md#12-alternatives-and-recommendations), choice C8)
   stays as it is; a parsed view there would amend that choice, and the owner can ask for it later.
-- This proposal does not touch the draft render and per-field provenance of
+- This specification does not touch the draft render and per-field provenance of
   [ginsys/bronzeward#336](https://github.com/ginsys/bronzeward/issues/336). That item can use the same tree
   later. It decides nothing about it, nor about the assisted proposals of
   [ginsys/bronzeward#919](https://github.com/ginsys/bronzeward/issues/919).
@@ -180,10 +184,10 @@ This section uses the blocks of the [console layout design](../design/console-la
 ([ginsys/bronzeward#1235](https://github.com/ginsys/bronzeward/issues/1235)). That design is itself a
 proposal the owner has not accepted. The project works with that design's recommendations for now, and the
 owner can reverse them. This section follows the blocks as the design proposes them, and follows any change
-the owner makes to one. It redesigns nothing in the layout: it only says where the parts of this proposal go.
+the owner makes to one. It redesigns nothing in the layout: it only says where the parts of this specification go.
 
 - **The editor is a panel under Entries.** The layout design opens an entry's editor in its own panel
-  directly under the Entries panel, and leaves the fields to this proposal (layout design, sections 2.2 and
+  directly under the Entries panel, and leaves the fields to this specification (layout design, sections 2.2 and
   3.1). The form's groups from section 4 are the content of that panel, in one column.
 - **The panel band** holds the panel's title (the fragment's name) and an *Edit as text* button, secondary.
   In text mode the same button reads *Edit as fields*. The layer list sits at the top of the panel body.
@@ -208,7 +212,7 @@ the owner makes to one. It redesigns nothing in the layout: it only says where t
   [ginsys/bronzeward#336](https://github.com/ginsys/bronzeward/issues/336).
 
 One point the layout design may want to settle: it says a panel with a form has "the form's one action", and
-that the page has one filled button. This proposal reads both together, so the form's action is outlined.
+that the page has one filled button. This specification reads both together, so the form's action is outlined.
 
 ## 7. Keyboard and labels
 
@@ -224,24 +228,31 @@ form keeps these rules, and each build item below keeps them:
 - Autocomplete, spellcheck and capitalisation help are off on every field that can hold a value that may be a
   secret, as on the text areas today.
 
-## 8. Questions for the owner
+## 8. Decisions and questions
 
-Each has a recommendation. Questions 1 to 4 are the owner's. Section 3 and section 4 record what was decided
-on the rules above and needs no answer.
+The question to the owner was whether to amend choice C3, with the recommendation yes. Three more
+questions carried a recommendation each. Their answers are recorded here by who gave them.
 
-1. **Amend choice C3?** The recorded choice is "accepted; usability unmeasured", and the owner's test is
-   the measurement. *Recommendation: yes, for the fragment editor and the imported configuration.*
-2. **Schema-driven forms, or hand-made forms for the common fields only?** See the options below.
-   *Recommendation: schema-driven.*
-3. **How much of the schema?** The legacy `v1alpha1` document first, with `machine` and `cluster`, or all 89
-   document kinds. *Recommendation: `v1alpha1` first, the other kinds read through the generic field rules
-   and shown under Other settings where they do not fit.*
-4. **What happens to a field the form cannot show?** *Recommendation: keep it, show it under Other settings,
-   never delete or reorder it.*
+**Decided by the owner.** On 28 November 2026 at 10:49 CET the owner answered the first question on the
+status page: "A. Yes, amend it". As the project lead recorded it, option A is: the fragment editor and the
+imported configuration get schema-driven forms and a parsed display, display first, editing second, secrets
+by reference, and the text box stays as a fallback.
 
-**Decided, not asked:** parse in the page; ship the schema as a build asset; hide comments in the parsed
-display by default; use the contract of the draft's cluster for a shared fragment; leave profiles and
-assignments unchanged.
+**Decided on the recommendation, which the owner can reverse.** One option was clearly recommended for each
+of the other three questions, so the project lead took the recommendation as decided. These are not the
+owner's answers.
+
+- *Schema-driven forms, or hand-made forms for the common fields only?* Recommendation, taken: schema-driven
+  (see the options below).
+- *How much of the schema?* The legacy `v1alpha1` document first, with `machine` and `cluster`, or all 89
+  document kinds. Recommendation, taken: `v1alpha1` first, the other kinds read through the generic field
+  rules and shown under Other settings where they do not fit.
+- *What happens to a field the form cannot show?* Recommendation, taken: keep it, show it under Other
+  settings, never delete or reorder it.
+
+**Decided in this document, from the rules above:** parse in the page; ship the schema as a build asset;
+hide comments in the parsed display by default; use the contract of the draft's cluster for a shared
+fragment; leave profiles and assignments unchanged.
 
 ### Options and trade-offs
 
@@ -250,9 +261,9 @@ assignments unchanged.
 | Source of forms | **A. Schema-driven**, from the pinned schema | One source with the compiler; a new Talos minor needs a new asset, not new forms; covers every field | A generic renderer for choices, maps and lists is real work; the schema carries no secret flag, so the list is a second asset |
 | | **B. Hand-made**, common fields only | Better labels and order for the few fields people change most | A second model that drifts at every Talos minor, which is what choice C3 feared; the rest stays text |
 | First build | **1. Parsed read-only display first** | Proves the schema asset, the version choice and the round trip before anything writes; answers "not parsed forms" at once | The person still edits as text for a while |
-| | **2. Editing first** | The editor is what the owner named first | Writes before the parser has a record |
+| | **2. Editing first** | The text box is where a person edits today | Writes before the parser has a record |
 
-*Recommendation: A, and display first (1).* A bounded A covers scalars, choices, lists of scalars and nested
+*Recommendation, taken: A, and display first (1).* A bounded A covers scalars, choices, lists of scalars and nested
 objects. Everything else is *Other settings*.
 
 ## 9. What is not built
@@ -271,7 +282,7 @@ objects. Everything else is *Other settings*.
 ## 10. Build items
 
 Small pull requests, in order. Each leaves the API, the stored text, marks and the references table
-unchanged. None is filed until the owner accepts this proposal.
+unchanged. The project lead files the issues after this document merges, one per behaviour.
 
 1. **Schema asset and contract choice, no screen.** Generate the schema and the secret-field list from the
    pinned module in the web build; pick the asset by the cluster's contract; say "no form" when there is none.
@@ -284,4 +295,6 @@ unchanged. None is filed until the owner accepts this proposal.
 5. **The reference control for secret fields**, with the declaration written in the same save, and
    *Mark as secret* on a field.
 6. **Go to the problem** from a refusal into a field. Leaves the text positions unchanged.
-7. **Amend choice C3** and the sentence of operator experience section 6, after the owner accepts.
+7. **Bring the rest of operator experience in line** with what items 1 to 6 built: the wireframe of the
+   fragment editor and any other text that still shows a plain text box as the only editor. Choice C3 and
+   the sentence of its section 6 were amended with this document.
