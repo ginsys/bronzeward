@@ -8,6 +8,17 @@ github.com/ginsys/bronzeward/fixtures/oidc/groups generate=0 generate/secrets=0
 github.com/ginsys/bronzeward/fixtures/oidc/issuer generate=0 generate/secrets=0
 github.com/ginsys/bronzeward/fixtures/webhost generate=0 generate/secrets=0
 
+== controls and the tagged build
+control: go list -deps -test of test packages that call generate.NewInput must list it
+./internal/compile (with tests) generate=1
+./internal/ingest (with tests) generate=1
+./internal/api (with tests) generate=1
+./internal/clitest (with tests) generate=1
+fixture build tag fixtureinterrupt:
+./cmd/bronzeward -tags fixtureinterrupt generate=0
+non-test, non-experiment importers of the generate package (source read):
+none
+
 == synthetic generation of the etcd encryption providers from one secrets bundle (kinds, key names and lengths only)
 -- v1.14.5
 secretbox-only: 1 provider(s)

@@ -1,0 +1,11 @@
+2026-11-28T17:45:03+01:00 /home available 37587 MiB, floor 20480 MiB
+built a from d8c4ba5289a48ff51bd96c0cc244eb279e0c2085 with 0 patch(es)
+== versions.env Talos lines in this chain:
+TALOS_VERSION=v1.14.7
+TALOSCTL_URL=https://github.com/siderolabs/talos/releases/download/v1.14.7/talosctl-linux-amd64
+TALOSCTL_SHA256=823deb86e20d79f08d000b266e63e4bffc772ee80364ce405bad5659bcacfb18
+TALOS_IMAGE=ghcr.io/siderolabs/talos:v1.14.7@sha256:cf23135c4dc42f4031f6e68af92e312f2a1540c4071005d47ed82dbd58201cc3
+== machinery in this chain:
+	github.com/siderolabs/talos/pkg/machinery v1.14.5
+34e50e2493c714dd1fb9e5b8009788ee34603a93
+2026-11-28T17:45:05+01:00 start chain a7

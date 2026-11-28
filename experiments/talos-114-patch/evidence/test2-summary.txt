@@ -76,33 +76,73 @@ failing tests:
     --- FAIL: TestProtected/T3 (2.95s)
 
 == c-goldens
-commit 7226db02e835887271c0e846e329b9b461f8c631 variant c set goldens started 2026-11-28T16:54:34+01:00
-JOB_CREATED: verify-bronzeward-7226db0-1795881274-05a3fb01 in heavy-runs for head 7226db02e835887271c0e846e329b9b461f8c631
-== variant c, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.7
-ok  	github.com/ginsys/bronzeward/internal/clitest	104.600s
-VERIFY_SECONDS=258
-VERIFY_DONE rc=0
-run-cluster-job exit 0 finished 2026-11-28T17:03:36+01:00
+commit 16c26333baa844810d12ab864763184011fc160c variant c set goldens started 2026-11-28T18:18:17+01:00
+run-cluster-job exit 2 finished 2026-11-28T18:18:17+01:00
 skipped tests: 0
 failing tests:
   none
 
 == a-goldens
-commit 7226db02e835887271c0e846e329b9b461f8c631 variant a set goldens started 2026-11-28T17:03:36+01:00
-JOB_CREATED: verify-bronzeward-7226db0-1795881816-ef3e6775 in heavy-runs for head 7226db02e835887271c0e846e329b9b461f8c631
-== variant a, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.5
-ok  	github.com/ginsys/bronzeward/internal/clitest	115.944s
-VERIFY_SECONDS=191
-VERIFY_DONE rc=0
-run-cluster-job exit 0 finished 2026-11-28T17:08:24+01:00
+commit 16c26333baa844810d12ab864763184011fc160c variant a set goldens started 2026-11-28T18:18:17+01:00
+run-cluster-job exit 2 finished 2026-11-28T18:18:17+01:00
 skipped tests: 0
 failing tests:
   none
 
-== skip reasons seen in c-rest (unique reasons, count)
-      1 BW_BIN_DIR and BW_EXPECT_VERSION are not set
-      1 BW_TEST_IDP_ISSUER is unset (mise run dev-idp)
-      5 BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
-      7 dbus-daemon is not installed
-      1 gnome-keyring-daemon is not installed
-      2 set by experiments/c10-machinery-gate/run/all
+== every skipped test of c-api with the reason it printed (skip lines: test, then the line before it)
+BW_E2E_NODE_OUT names no file: this test is the browser cases' Talos target
+--- SKIP: TestE2ENode (0.00s)
+BW_E2E_SEED_DSN and BW_E2E_SEED_OUT unset: this is the browser harness's step
+--- SKIP: TestE2ESeed (0.00s)
+BW_E2E_DRIFT_DSN and BW_E2E_DRIFT_MACHINE unset: this is the browser harness's step
+--- SKIP: TestE2EDrift (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+--- SKIP: TestIdentityProviderRoles (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+--- SKIP: TestIdentityProviderRefresh (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+--- SKIP: TestIdentityProviderRevocation (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+--- SKIP: TestIdentityProviderEndSession (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+--- SKIP: TestIdentityProviderDevice (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+--- SKIP: TestIdentityProviderIDToken (0.00s)
+
+== every skipped test of c-rest with the reason it printed (skip lines: test, then the line before it)
+dbus-daemon is not installed
+--- SKIP: TestSecretServiceBounded (0.00s)
+dbus-daemon is not installed
+--- SKIP: TestSecretServiceStoppedReader (0.00s)
+dbus-daemon is not installed
+--- SKIP: TestSecretServiceDismissWaitsForCompleted (0.00s)
+dbus-daemon is not installed
+--- SKIP: TestSecretServiceDismissNoAnswer (0.00s)
+dbus-daemon is not installed
+--- SKIP: TestSecretServiceNeverPrompts (0.00s)
+no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp)
+--- SKIP: TestLoginIdentityProvider (0.00s)
+    --- PASS: TestLogin/memory (1.25s)
+    --- SKIP: TestLogin/no_secret_service (0.00s)
+    --- SKIP: TestLogin/activatable_secret_service (0.00s)
+    --- SKIP: TestLogin/system_credential_store (0.00s)
+BW_BIN_DIR and BW_EXPECT_VERSION are not set: no packaged binaries to run
+--- SKIP: TestPackagedVersion (0.00s)
+set by experiments/c10-machinery-gate/run/all
+--- SKIP: TestMachineryGate (0.00s)
+set by experiments/c10-machinery-gate/run/all
+--- SKIP: TestSensitivityGate (0.00s)
+BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+--- SKIP: TestLiveRead (0.00s)
+BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+--- SKIP: TestLiveApply (0.00s)
+BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+--- SKIP: TestLiveApplyLabelDocument (0.00s)
+BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+--- SKIP: TestLiveUnreachable (0.00s)
+BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+--- SKIP: TestLiveRoleProbe (0.00s)
+
+Reading of the skips: a test that needs a service the pod does not start (an identity provider, a Talos node, a D-Bus session,
+packaged binaries) skips as unavailable; TestE2E* belong to the browser harness; TestMachineryGate and TestSensitivityGate are
+deliberately left to their own script (experiments/c10-machinery-gate/run/all) and are not run in a Go test run.

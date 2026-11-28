@@ -1,19 +1,18 @@
-commit 896eada03d9f036f92dbe7eb81331b3c81e5c717
-BUNDLE: head 896eada03d9f036f92dbe7eb81331b3c81e5c717 on base d8c4ba5289a48ff51bd96c0cc244eb279e0c2085, 11849 bytes
-JOB_CREATED: verify-bronzeward-896eada-1795876279-34f9fa66 in heavy-runs for head 896eada03d9f036f92dbe7eb81331b3c81e5c717
+BUNDLE: head 16c26333baa844810d12ab864763184011fc160c on base d8c4ba5289a48ff51bd96c0cc244eb279e0c2085, 47667 bytes
+JOB_CREATED: verify-bronzeward-16c2633-1795886042-1f0fb6a8 in heavy-runs for head 16c26333baa844810d12ab864763184011fc160c
 POD_NODE=alcorak
-POD_HEAD=896eada03d9f036f92dbe7eb81331b3c81e5c717
+POD_HEAD=16c26333baa844810d12ab864763184011fc160c
 mise: installing mise...
-#=#=#                                                                                                                                                     0.2%##                                                                         3.2%###########                                                               16.5%#######################                                                   33.2%###################################                                       49.6%###############################################                           65.6%#########################################################                 80.5%####################################################################      95.6%######################################################################## 100.0%
+#=#=#                                                                          ##O#-#                                                                         ###                                                                        5.3%################                                                          22.6%############################                                              40.0%########################################                                  56.2%####################################################                      73.4%################################################################          89.7%######################################################################## 100.0%
 mise: installed successfully to mise
 mise: run `mise --help` to get started
-SETUP_SECONDS=46
+SETUP_SECONDS=30
 TOOLCHAIN mise=2026.10.17 linux-x64 (2026-10-21)
 TOOLCHAIN tools=actionlint  1.7.12   mise.toml  1.7.12|go          1.27.1   mise.toml  1.27.1|goreleaser  2.19.0   mise.toml  2.19.0|jq          1.8.2    the pod mise config   1.8.2|node        24.22.1  mise.toml  24.22.1|python      3.12.16  the pod mise config   3.12|shellcheck  0.11.0   mise.toml  0.11.0
 TOOLCHAIN github_token=MISE_GITHUB_TOKEN
 TOOLCHAIN go=go version go1.27.1 linux/amd64 goroot=1.27.1 sha256=30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624
 VERIFY_CMD=experiments/talos-114-patch/run/probe
-work directory: talos114.A7ud1F
+work directory: talos114.roT66e
 built a from d8c4ba5289a48ff51bd96c0cc244eb279e0c2085 with 0 patch(es)
 built c from d8c4ba5289a48ff51bd96c0cc244eb279e0c2085 with 1 patch(es)
 == run out-a: machinery v1.14.5
@@ -26,10 +25,13 @@ probe gen default-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryId
 probe gen default-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
 probe gen default-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
 probe enc sbox generated=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d providers=secretbox:key2
+    zz_talos114_probe_test.go:345: enc sbox input providers=secretbox
 probe case own-enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d
 probe enc aescbc generated=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 providers=secretbox:key1
+    zz_talos114_probe_test.go:345: enc aescbc input providers=aescbc
 probe case own-enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5
 probe enc both generated=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 providers=secretbox:key2,secretbox:key1
+    zz_talos114_probe_test.go:345: enc both input providers=secretbox,aescbc
 probe case own-enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230
 probe input base-controlplane.yaml=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5
 probe input base-worker.yaml=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3
@@ -106,19 +108,19 @@ probe own full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes):
 probe case trim-short-secret refused stage=compile rule=invalid input="" paths=[] message="<withheld: the validation message may quote a sensitive value>"
 probe case trim-bad-secret refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* DiscoveryIdentityConfig: invalid clusterSecret: failed to decode from base64: <redacted:s-bqlozm42y7lpusssll2ohbxi5a@1>; illegal base64 data at input byte 5\n\n"
 probe case enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
-probe case enc-sbox records provenance=af5a41a7e42b5e014eee9d5d8c4a15cef53d80126fa666668ef7b17851c8fbed effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=42a34784c067f1d2667c4156d73354ddcba8ac1b404abf5524e7ecc7694a95af
+probe case enc-sbox records provenance=95054c108455b0b343bdfb85c98a6e4c8b03a633682ab0d855b641a6862b8761 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=08cd17d0dab0a00d49d58088577c9c7808a2391de914c50d1c89b42b3d39737c
 probe case enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
-probe case enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 redacted=cb4bcf9f425f5374ccad85aef586c4e2522418a09c7bd6ee1bf5cb0eae0e7274 formonly=true hostname=none:""
-probe case enc-aescbc records provenance=c94a20af15bb6f228ea1deaed3ac5d63a6cbfe6778a3920be12ab9bbc37f4618 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=c209ff5865fdb227f9cceacf6e6f5eacf02a7db8d30c418cc65ec08e2fd18ae5
+probe case enc-aescbc ok materialized=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87 redacted=7be634896af8a1ffcc6ded283abe1fe5aab80779c6a0919b49a3aa13b95315c5 formonly=true hostname=none:""
+probe case enc-aescbc records provenance=23f264f210beaceaa193bbbc56573277eb247da02cbbbdda5840860bf7842f02 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=33ab54b9e4ca92b0b1b6a8ed44471e82e417637fee9d96ff476ed51d2664ad0d
 probe case enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
-probe case enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 redacted=58c1d597faeb6d44b8f9bf03e8fee0f1639daa04938ebad54874956950e11f9e formonly=true hostname=none:""
-probe case enc-both records provenance=4807da73ad8da0fb431b180f839f29509dafd4dd4f8fb97ab2892bb9ca896a88 effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=7ffa0d4578855e82e14181252ddedbe8f840a5a556feeb070b936ce604ade63e
+probe case enc-both ok materialized=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f redacted=ac935923f8e3ef9c63cda3a6e9b06b5dd2e744a7b55f066cf73d402cab21bf98 formonly=true hostname=none:""
+probe case enc-both records provenance=bb47eb1fe70f2d19c11b18ed04dc3eec4f8a3bdfda9487c38c1069532ea37f8b effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=1248b1a7e442327562fb622c7bf3723ac68c679d0196586274b5ae0b5dba36f6
 probe case enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe cases=28
-ok  	github.com/ginsys/bronzeward/internal/compile	12.918s
+ok  	github.com/ginsys/bronzeward/internal/compile	13.720s
 == run out-a2: machinery v1.14.5
 probe gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
 probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
@@ -209,19 +211,19 @@ probe own full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes):
 probe case trim-short-secret refused stage=compile rule=invalid input="" paths=[] message="<withheld: the validation message may quote a sensitive value>"
 probe case trim-bad-secret refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* DiscoveryIdentityConfig: invalid clusterSecret: failed to decode from base64: <redacted:s-bqlozm42y7lpusssll2ohbxi5a@1>; illegal base64 data at input byte 5\n\n"
 probe case enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
-probe case enc-sbox records provenance=af5a41a7e42b5e014eee9d5d8c4a15cef53d80126fa666668ef7b17851c8fbed effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=42a34784c067f1d2667c4156d73354ddcba8ac1b404abf5524e7ecc7694a95af
+probe case enc-sbox records provenance=95054c108455b0b343bdfb85c98a6e4c8b03a633682ab0d855b641a6862b8761 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=08cd17d0dab0a00d49d58088577c9c7808a2391de914c50d1c89b42b3d39737c
 probe case enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
-probe case enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 redacted=cb4bcf9f425f5374ccad85aef586c4e2522418a09c7bd6ee1bf5cb0eae0e7274 formonly=true hostname=none:""
-probe case enc-aescbc records provenance=c94a20af15bb6f228ea1deaed3ac5d63a6cbfe6778a3920be12ab9bbc37f4618 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=c209ff5865fdb227f9cceacf6e6f5eacf02a7db8d30c418cc65ec08e2fd18ae5
+probe case enc-aescbc ok materialized=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87 redacted=7be634896af8a1ffcc6ded283abe1fe5aab80779c6a0919b49a3aa13b95315c5 formonly=true hostname=none:""
+probe case enc-aescbc records provenance=23f264f210beaceaa193bbbc56573277eb247da02cbbbdda5840860bf7842f02 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=33ab54b9e4ca92b0b1b6a8ed44471e82e417637fee9d96ff476ed51d2664ad0d
 probe case enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
-probe case enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 redacted=58c1d597faeb6d44b8f9bf03e8fee0f1639daa04938ebad54874956950e11f9e formonly=true hostname=none:""
-probe case enc-both records provenance=4807da73ad8da0fb431b180f839f29509dafd4dd4f8fb97ab2892bb9ca896a88 effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=7ffa0d4578855e82e14181252ddedbe8f840a5a556feeb070b936ce604ade63e
+probe case enc-both ok materialized=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f redacted=ac935923f8e3ef9c63cda3a6e9b06b5dd2e744a7b55f066cf73d402cab21bf98 formonly=true hostname=none:""
+probe case enc-both records provenance=bb47eb1fe70f2d19c11b18ed04dc3eec4f8a3bdfda9487c38c1069532ea37f8b effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=1248b1a7e442327562fb622c7bf3723ac68c679d0196586274b5ae0b5dba36f6
 probe case enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe cases=28
-ok  	github.com/ginsys/bronzeward/internal/compile	13.751s
+ok  	github.com/ginsys/bronzeward/internal/compile	13.711s
 == run out-c: machinery v1.14.7
 probe gen v114-controlplane commented=95cfec5c2f23f5af90d1be78993deb0bc7b30a8f1708f9bed39201c7d5822002 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
 probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
@@ -312,23 +314,23 @@ probe own full-hostname-fill kubernetes[v1.14.7]="compile: refused (kubernetes):
 probe case trim-short-secret refused stage=compile rule=invalid input="" paths=[] message="<withheld: the validation message may quote a sensitive value>"
 probe case trim-bad-secret refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* DiscoveryIdentityConfig: invalid clusterSecret: failed to decode from base64: <redacted:s-bqlozm42y7lpusssll2ohbxi5a@1>; illegal base64 data at input byte 5\n\n"
 probe case enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
-probe case enc-sbox records provenance=af5a41a7e42b5e014eee9d5d8c4a15cef53d80126fa666668ef7b17851c8fbed effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=42a34784c067f1d2667c4156d73354ddcba8ac1b404abf5524e7ecc7694a95af
+probe case enc-sbox records provenance=95054c108455b0b343bdfb85c98a6e4c8b03a633682ab0d855b641a6862b8761 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=08cd17d0dab0a00d49d58088577c9c7808a2391de914c50d1c89b42b3d39737c
 probe case enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-sbox kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
-probe case enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 redacted=cb4bcf9f425f5374ccad85aef586c4e2522418a09c7bd6ee1bf5cb0eae0e7274 formonly=true hostname=none:""
-probe case enc-aescbc records provenance=c94a20af15bb6f228ea1deaed3ac5d63a6cbfe6778a3920be12ab9bbc37f4618 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=c209ff5865fdb227f9cceacf6e6f5eacf02a7db8d30c418cc65ec08e2fd18ae5
+probe case enc-aescbc ok materialized=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87 redacted=7be634896af8a1ffcc6ded283abe1fe5aab80779c6a0919b49a3aa13b95315c5 formonly=true hostname=none:""
+probe case enc-aescbc records provenance=23f264f210beaceaa193bbbc56573277eb247da02cbbbdda5840860bf7842f02 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=33ab54b9e4ca92b0b1b6a8ed44471e82e417637fee9d96ff476ed51d2664ad0d
 probe case enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-aescbc kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
-probe case enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 redacted=58c1d597faeb6d44b8f9bf03e8fee0f1639daa04938ebad54874956950e11f9e formonly=true hostname=none:""
-probe case enc-both records provenance=4807da73ad8da0fb431b180f839f29509dafd4dd4f8fb97ab2892bb9ca896a88 effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=7ffa0d4578855e82e14181252ddedbe8f840a5a556feeb070b936ce604ade63e
+probe case enc-both ok materialized=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f redacted=ac935923f8e3ef9c63cda3a6e9b06b5dd2e744a7b55f066cf73d402cab21bf98 formonly=true hostname=none:""
+probe case enc-both records provenance=bb47eb1fe70f2d19c11b18ed04dc3eec4f8a3bdfda9487c38c1069532ea37f8b effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=1248b1a7e442327562fb622c7bf3723ac68c679d0196586274b5ae0b5dba36f6
 probe case enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe own enc-both kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
 probe cases=28
-ok  	github.com/ginsys/bronzeward/internal/compile	13.426s
+ok  	github.com/ginsys/bronzeward/internal/compile	14.726s
 == results out-a vs out-a2 (no lines below means equal)
 == key paths out-a vs out-a2
-keydiff compared=46 differing=0
-ok  	github.com/ginsys/bronzeward/internal/compile	0.010s
+keydiff compared=46 differing=0 unmatched=0
+ok  	github.com/ginsys/bronzeward/internal/compile	0.013s
 == results out-a vs out-c (no lines below means equal)
 1c1
 < gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
@@ -373,9 +375,8 @@ keydiff mat-own-enc-both.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/pr
 keydiff mat-own-enc-both.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/aescbc/keys/0/secret
 keydiff mat-own-enc-both.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/secretbox/keys/0/name
 keydiff mat-own-enc-both.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/secretbox/keys/0/secret
-keydiff compared=46 differing=4
-ok  	github.com/ginsys/bronzeward/internal/compile	0.016s
+keydiff compared=46 differing=4 unmatched=0
+ok  	github.com/ginsys/bronzeward/internal/compile	0.020s
 == done
-VERIFY_SECONDS=95
+VERIFY_SECONDS=110
 VERIFY_DONE rc=0
-run-cluster-job exit 0
