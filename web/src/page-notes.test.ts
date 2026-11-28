@@ -190,13 +190,46 @@ describe("the machine page through its own reads", () => {
 });
 
 // The draft page, the cluster page, the Clusters and Machines lists, the operation page, the six list pages (Drafts and releases, Plans,
-// Operations, Imports, Fragments and profiles, Audit), the plan page, the apply page and the drift page draw their note as one visible line
-// with the full note behind "What is this page?" (client contracts §10.4 item 6, ginsys/bronzeward#1255, ginsys/bronzeward#1257,
-// ginsys/bronzeward#1259 and ginsys/bronzeward#1261; `group-a-layout.test.ts`, `group-b-layout.test.ts` and `group-c1-layout.test.ts` pin the
+// Operations, Imports, Fragments and profiles, Audit), the plan page, the apply page, the drift page, the machine page, the release page and
+// the rendered review draw their note as one visible line with the full note behind "What is this page?" (client contracts §10.4 item 6,
+// ginsys/bronzeward#1255, ginsys/bronzeward#1257, ginsys/bronzeward#1259, ginsys/bronzeward#1261 and ginsys/bronzeward#1263;
+// `group-a-layout.test.ts`, `group-b-layout.test.ts`, `group-c1-layout.test.ts` and `group-c2-layout.test.ts` pin the
 // line of each); every other page's note is still shown whole under its title, as the tests above and below assert, and so is the plan page's
 // approval part, which stays whole inside the Approval panel. The full note's text is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
 // action), the visible line and the disclosure's summary.
+// The machine page, the release page and the rendered review (ginsys/bronzeward#1263): the line is the first sentence of the note, and the
+// whole note, with the link the machine page's note carries, is behind the disclosure.
+describe("the machine, release and review notes as a line and a disclosure", () => {
+  const behind = () => box.querySelector("details.about")!.contains(note());
+  const line = () => box.querySelector('[data-testid="page-note-line"]')!.textContent;
+  test("the machine page: the line is the first sentence, and the whole note and its link are behind the disclosure", async () => {
+    served[`/machines/${MCH}`] = machine;
+    served[`/machines/${MCH}/position`] = { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" };
+    await shown(h(MachineItem, { id: MCH }));
+    expect(line()).toBe(firstSentence(MACHINE_NOTE));
+    expect(behind()).toBe(true);
+    expect(box.querySelector("details.about")!.contains(linksTo("/drafts/new")[0]!)).toBe(true);
+  });
+  test("the release page: the line is the first sentence, and the whole note is behind the disclosure", async () => {
+    served[`/releases/${REL}`] = release;
+    await shown(h(ReleaseItem, { id: REL }));
+    expect(line()).toBe(firstSentence(RELEASE_NOTE));
+    expect(behind()).toBe(true);
+  });
+  test("the rendered review: the line is the first sentence, and the whole note is behind the disclosure; a withheld review has neither", async () => {
+    served[`/machines/${MCH}/position`] = { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" };
+    served[`/releases/${REL}/machines/${MCH}/review`] = { release: REL, machine: MCH, mode: "metal", configuration: "a: b", provenance: [] };
+    await shown(h(ReviewItem, { release: REL, machine: MCH }));
+    expect(line()).toBe(firstSentence(REVIEW_NOTE));
+    expect(behind()).toBe(true);
+    served[`/releases/${REL}/machines/${MCH}/review`] = { release: REL, machine: MCH, mode: "metal", configuration: null, provenance: [] };
+    await shown(h(ReviewItem, { release: REL, machine: MCH, key: "withheld" }));
+    expect(box.querySelector('[data-testid="page-note-line"]')).toBeNull();
+    expect(box.querySelector("details.about")).toBeNull();
+  });
+});
+
 describe("the draft page's note, a part only where its control shows", () => {
   const parts = (...p: string[]) => p.join(" ");
   const head = () => [box.querySelector(".page-head"), box.querySelector('[data-testid="page-note-line"]'), box.querySelector("details.about > summary")];

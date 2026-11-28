@@ -504,20 +504,25 @@ function ApplyItem({ id }: { id: string }) {
 
 export function ReleaseItem({ id }: { id: string }) {
   return (
-    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={(r) => (r === undefined ? `Release ${short(id)}` : <ReleaseHeading id={id} r={r} />)}>
+    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" head title={(r) => (r === undefined ? `Release ${short(id)}` : <ReleaseHeading id={id} r={r} />)}
+      actions={(r) => <Ref to={applyPath(r.id)} id={r.id} button="filled">Apply this release to machines</Ref>}>
       {(r) => (
         <>
-          <PageNote parts={[RELEASE_NOTE]} />
-          <p><Ref to={applyPath(r.id)} id={r.id}>Apply this release to machines</Ref></p>
-          <Fields rows={[
-            ["Identifier", r.id], ["Cluster", <ClusterLink id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
-            ["Renderer", `contract ${r.renderer.contract} · machinery ${r.renderer.machineryVersion} · Kubernetes ${r.renderer.kubernetesVersion}`],
-            ["Draft", <><Named id={r.draft} />, built from its revision {r.draftRevision}</>], ["Publication", <Named id={r.operation} />],
-          ]} />
-          <h3>Source revisions this release was built from (these are not configuration)</h3>
-          <Rows label="Source revisions" cols={BUILT} items={r.sources} keyOf={(s) => `${s.kind}:${s.head}:${s.revision}`} />
-          <h3>Machines covered ({r.machines.length})</h3>
-          <Rows label="Machines covered" cols={covered(r.id)} items={r.machines} keyOf={(m) => m.machine} />
+          <Note line={firstSentence(RELEASE_NOTE)} parts={[RELEASE_NOTE]} />
+          <Panel title="Details">
+            <Fields rows={[
+              ["Identifier", r.id], ["Cluster", <ClusterLink id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
+              ["Renderer", `contract ${r.renderer.contract} · machinery ${r.renderer.machineryVersion} · Kubernetes ${r.renderer.kubernetesVersion}`],
+              ["Draft", <><Named id={r.draft} />, built from its revision {r.draftRevision}</>], ["Publication", <Named id={r.operation} />],
+            ]} />
+          </Panel>
+          {/* Each panel's name differs from its table region's, so a screen reader never meets two regions of one name. */}
+          <Panel title="Source revisions this release was built from (these are not configuration)" label="The source list">
+            <Rows label="Source revisions" cols={BUILT} items={r.sources} keyOf={(s) => `${s.kind}:${s.head}:${s.revision}`} />
+          </Panel>
+          <Panel title={`Machines covered (${r.machines.length})`} label="The covered machine list">
+            <Rows label="Machines covered" cols={covered(r.id)} items={r.machines} keyOf={(m) => m.machine} />
+          </Panel>
         </>
       )}
     </ItemOf>

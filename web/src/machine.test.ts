@@ -25,6 +25,9 @@ const READ = "2026-10-26T09:46:00Z";
 const obsA = observation("obs_a", 4, READ);
 const drift = { revision: 3, observation: "obs_k", lastObservation: "obs_a", lateLanding: null };
 const opened = observation("obs_k", 2, "2026-10-26T09:41:00Z");
+// The page's order when a read failed: the page header (title, identifier line, actions), the note's line and disclosure, the failure, then the
+// Status panel that starts with the machine's cluster line (the console layout, ginsys/bronzeward#1263).
+const STATUS_AFTER_FAILURE = /<h2>Machine 10\.5\.0\.2<\/h2><p><small>.*?<\/details>FAILED<section class="panel" aria-label="Machine status"><div class="panel-head"><h3>Status<\/h3><\/div><p><a href="\/clusters\/cl_a"/;
 
 describe("journeys ยง2.4 status sentences, field by field", () => {
   test("observed = applied, by an operation", () => {
@@ -232,7 +235,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
       id: "mch_a", m: failed, obs: { kind: "ok", data: read }, km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: read, restarted: true },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(out).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p><small>.*?<\/p>FAILED<p><a href="\/clusters\/cl_a"/);
+    expect(out).toMatch(STATUS_AFTER_FAILURE);
     expect(out).toContain(FROZEN);
     expect(out).toContain('data-testid="observations-restarted"');
   });
@@ -389,7 +392,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
       km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(out).toMatch(/<\/h2><p><small>.*?<\/p>FAILED<div class="alert"><svg[^>]*aria-hidden="true"[^>]*><path[^>]*><\/path><\/svg><p data-testid="restarted">/);
+    expect(out).toMatch(/<\/h2><p><small>.*?<\/details>FAILED<div class="alert"><svg[^>]*aria-hidden="true"[^>]*><path[^>]*><\/path><\/svg><p data-testid="restarted">/);
   });
 
   test("#443: an observations read again that fails shows its failure after the heading, and the observations kept still show", () => {
@@ -401,12 +404,12 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     const out = shown({ kind: "ok", data: machine({ frozen: true }) });
-    expect(out).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p><small>.*?<\/p>FAILED<p><a href="\/clusters\/cl_a"/);
+    expect(out).toMatch(STATUS_AFTER_FAILURE);
     expect(out).toContain('data-testid="observations"');
     expect(out).toContain('title="obs_a"');
     // Both reads failed, both kept: both failures, then the machine's rows and the observations.
     const both = shown(failed);
-    expect(both).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p><small>.*?<\/p>FAILEDFAILED<p><a href="\/clusters\/cl_a"/);
+    expect(both).toMatch(new RegExp(STATUS_AFTER_FAILURE.source.replace("FAILED", "FAILEDFAILED")));
     expect(both).toContain(FROZEN);
     expect(both).toContain('data-testid="observations"');
   });
@@ -590,7 +593,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     const answered = shown({ kind: "ok", data: machine({ frozen: true }) }, undefined);
-    expect(answered).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p><small>.*?<\/p>FAILED<p><a href="\/clusters\/cl_a"/);
+    expect(answered).toMatch(STATUS_AFTER_FAILURE);
     expect(answered).toContain('data-testid="sentences"');
     expect(answered).toContain(FROZEN);
     expect(answered).toContain("<dt>Desired</dt>");
@@ -599,7 +602,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
     expect(answered).not.toContain("<h3>Observations</h3>");
     expect(answered).not.toContain("No observation recorded.");
     // Both reads failed, the machine kept: both failures, then the kept machine's rows.
-    expect(shown({ kind: "unavailable", status: 503, problem: null }, machine({ frozen: true }))).toMatch(/<\/h2><p><small>.*?<\/p>FAILEDFAILED<p><a href="\/clusters\/cl_a"[^]*data-testid="sentences"/);
+    expect(shown({ kind: "unavailable", status: 503, problem: null }, machine({ frozen: true }))).toMatch(new RegExp(`${STATUS_AFTER_FAILURE.source.replace("FAILED", "FAILEDFAILED")}[^]*data-testid="sentences"`));
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
@@ -880,7 +883,7 @@ describe("the machine heading (client contracts A9)", () => {
       km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(page).toContain('<p><small>Identifier <code>mch_a</code> <button type="button">Copy</button></small></p>');
+    expect(page).toContain('<p><small>Identifier <code>mch_a</code> <button type="button" class="outline">Copy</button></small></p>');
     // No word stands before the fallback link: "Cluster This cluster" would read as a name.
     expect(page).toContain('<p><a href="/clusters/cl_a" title="cl_a">This cluster</a>, 10.5.0.2:50000, Talos node ID node-a, metal.</p>');
   });

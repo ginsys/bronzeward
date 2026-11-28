@@ -2407,12 +2407,15 @@ the client's rule wins wherever the two meet.
    disclosure. The publication page is the operation page, which is built (a note of one sentence, drawn plain). The plan page's
    approval part is not behind the disclosure: it stays whole inside the Approval panel and shows only where that panel's form
    shows, as before. The state lines of a plan (proposed, expired, stale, frozen, an approval from before a recovery entry) are
-   alerts that stay between the note and the first panel. The other pages follow in their own pull requests and show
-   the whole note under the title until then: a machine, a release and its review, a fragment, a profile or an
+   alerts that stay between the note and the first panel. The machine page, the release page and the rendered review draw theirs
+   the same way ([ginsys/bronzeward#1263](https://github.com/ginsys/bronzeward/issues/1263)): the first sentence of the page's note
+   is the line, and the whole note is behind the disclosure, with the link to Create a draft that the machine page's note carries.
+   The review page draws no note, and so no line and no disclosure, where its configuration is withheld, as before. The other
+   pages follow in their own pull requests and show the whole note under the title until then: a fragment, a profile or an
    assignment and its revisions, a dependency, an import and its configuration, the forms (Create
    draft, Start import, Plan new, Add machine, Enter a cluster by hand, Connect a cluster, the approval and scope decisions) and the
-   recovery pages. `web/src/page-notes.test.ts`, `web/src/group-a-layout.test.ts`, `web/src/group-b-layout.test.ts` and
-   `web/src/group-c1-layout.test.ts` pin both sets.
+   recovery pages. `web/src/page-notes.test.ts`, `web/src/group-a-layout.test.ts`, `web/src/group-b-layout.test.ts`,
+   `web/src/group-c1-layout.test.ts` and `web/src/group-c2-layout.test.ts` pin both sets.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:

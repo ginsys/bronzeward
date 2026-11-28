@@ -1,8 +1,9 @@
 // The layout blocks of the console layout design (docs/design/console-layout.md §2, ginsys/bronzeward#1255): a panel with a titled
 // band, a page header with the page's actions, and a note drawn as one visible line with the whole note behind a native
 // disclosure. The action variants are Action's (shell.tsx). The draft page, the cluster page, the Clusters and Machines lists, the
-// operation page (ginsys/bronzeward#1257), the six list pages (ginsys/bronzeward#1259) and the plan, apply, drift and operation item
-// pages (ginsys/bronzeward#1261) use them so far; the stylesheet is app.css, "Console layout blocks".
+// operation page (ginsys/bronzeward#1257), the six list pages (ginsys/bronzeward#1259), the plan, apply, drift and operation item
+// pages (ginsys/bronzeward#1261) and the machine, release and review pages (ginsys/bronzeward#1263) use them so far; the stylesheet is
+// app.css, "Console layout blocks".
 
 import type { ReactNode } from "react";
 import { PageNote } from "./page-note.tsx";
