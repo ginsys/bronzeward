@@ -341,7 +341,8 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       const { id, name, etag } = await toStaleSave();
       const w = watch();
       await fromTitle();
-      await tabTo((f) => f.tag === "BUTTON" && f.text === `fragment ${name}`, "the fragment entry");
+      // The entry's row ends in an Open button whose accessible name carries the entry (the Entries table, ginsys/bronzeward#1255).
+      await tabTo((f) => f.tag === "BUTTON" && f.label === `Open fragment ${name}`, "the fragment entry");
       await browser.keys("Enter");
       await loaded();
       await w.after("the entry selected");

@@ -115,7 +115,7 @@ describe("Connect a cluster (#1001)", () => {
     await expect($("main h2")).toHaveText(expect.stringContaining("Draft: "));
     const opens = $$(`${ENTRIES} a.button`);
     await expect(opens).toBeElementsArrayOfSize(2);
-    await expect($('section[aria-label="Protected document"]')).not.toBeExisting();
+    await absent(() => $('section[aria-label="Protected document"]').isExisting(), "a protected document on the draft page");
     await opens[0]!.click();
     await $('section[aria-label="Protected document"]').$("button=Show imported configuration").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
