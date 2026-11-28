@@ -38,6 +38,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		return releaseUnit{}, nil, err
 	}
 	version, checksum, err := compile.Machinery()
+	err = a.fault("machinery", err)
 	if err != nil {
 		return releaseUnit{}, nil, err
 	}
@@ -61,6 +62,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 	sources := map[string]compile.Source{}
 	for rev, st := range s.sources {
 		text, err := ingest.Stored(st.document, st.declarations)
+		err = a.fault("stored-source", err)
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("source %s: %w", rev, err)
 		}
@@ -74,6 +76,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 	artifacts := make([]compile.Materialized, 0, len(s.machines))
 	for _, m := range s.machines {
 		mode, err := compile.ParseMode(m.mode)
+		err = a.fault("mode", err)
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
@@ -96,6 +99,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		}
 		kubernetes = k
 		claim, claims1, err := claimOf(m, compiled)
+		err = a.fault("claim", err)
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
@@ -103,6 +107,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 			claims = append(claims, claim)
 		}
 		um, err := machineRecords(m, compiled, s, pins)
+		err = a.fault("records", err)
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
