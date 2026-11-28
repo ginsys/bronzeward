@@ -2414,12 +2414,18 @@ the client's rule wins wherever the two meet.
    profile or an assignment, a revision of one of them, a dependency, an import and an imported configuration draw theirs the same
    way (the second part of [ginsys/bronzeward#1263](https://github.com/ginsys/bronzeward/issues/1263)): the first sentence of the
    page's note is the line, and the whole note is behind the disclosure; none of these notes carries a link. The state lines of an
-   import (what its state allows, and the failed refresh) are alerts that stay between the note and the first panel. The other
-   pages show the whole note under the title: the forms (Create draft, Start import, Plan new, Add machine, Enter a cluster by
-   hand, Connect a cluster, the approval and scope decisions) and the recovery pages; the draft page's editors follow
+   import (what its state allows, and the failed refresh) are alerts that stay between the note and the first panel. The six
+   entry forms draw theirs the same way ([ginsys/bronzeward#1266](https://github.com/ginsys/bronzeward/issues/1266)): Create draft,
+   Start import (and Start drift adoption), Plan new, Add machine, Enter a cluster by hand and Connect a cluster show the first
+   sentence of the page's note as the line, with the whole note behind the disclosure and the form in a panel below it. A refused
+   address of Start import and a refusal of Connect a cluster's read are alerts that stay between the note and the panel, and Plan
+   new, with no release and machine named, shows its one alert with no note, as before. The approval part of the plan page's note
+   stays whole inside the Approval panel (built above). The other pages show the whole note under the title: the recovery pages,
+   whose scope decisions are drawn inside the recovery console; the draft page's editors follow
    [ginsys/bronzeward#1234](https://github.com/ginsys/bronzeward/issues/1234).
    `web/src/page-notes.test.ts`, `web/src/group-a-layout.test.ts`, `web/src/group-b-layout.test.ts`,
-   `web/src/group-c1-layout.test.ts`, `web/src/group-c2-layout.test.ts` and `web/src/group-c3-layout.test.ts` pin both sets.
+   `web/src/group-c1-layout.test.ts`, `web/src/group-c2-layout.test.ts`, `web/src/group-c3-layout.test.ts` and
+   `web/src/group-e-layout.test.ts` pin both sets.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:
