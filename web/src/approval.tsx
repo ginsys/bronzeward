@@ -8,6 +8,7 @@ import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
 import { useReleaseNames } from "./titles.tsx";
+import { Panel } from "./layout.tsx";
 import { PageNote } from "./page-note.tsx";
 import { Who } from "./principals.tsx";
 import { safeText, safeWord } from "./safe.ts";
@@ -147,7 +148,7 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   const over = overwrites(p);
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
   const form = (
-    <section aria-label="Approval">
+    <Panel title="Approval">
       <PageNote parts={[PLAN_NOTE_APPROVE]} />
       <Prediction p={p} />
       {over !== undefined && <Status testid="unseen-overwrite">{over}</Status>}
@@ -155,7 +156,7 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
         <p>Pressing Approve records your approval of this plan. {afterApproval(p, releaseName)} Approval is for a human sign-in only.</p>
         <p><Action label="Approve" needs={["approver"]} submit busy={busy} /></p>
       </form>
-    </section>
+    </Panel>
   );
   // An approved plan whose approval is from an earlier epoch authorizes nothing, and the page offers a new approval.
   const shown = p.state === "proposed" ? form
@@ -199,11 +200,13 @@ export function RevokeControl({ p, reread }: { p: Plan; reread: () => void }) {
   };
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
   const form = (
-    <form onSubmit={submit} aria-label="Revoke approval">
-      <p><label>Reason (at most {REASON_MAX} bytes) <input name="reason" autoComplete="off" disabled={busy} /></label></p>
-      <p><Action label="Revoke approval" needs={["approver", "recovery-admin"]} submit busy={busy} /> <span data-testid="revoke-limit">{REVOKE_LIMIT}</span></p>
-      {note !== undefined && <p role="alert" data-testid="revoke-input">{note}</p>}
-    </form>
+    <Panel title="Revoke approval" label="Revocation">
+      <form onSubmit={submit} aria-label="Revoke approval">
+        <p><label>Reason (at most {REASON_MAX} bytes) <input name="reason" autoComplete="off" disabled={busy} /></label></p>
+        <p><Action label="Revoke approval" variant="destructive" needs={["approver", "recovery-admin"]} submit busy={busy} /> <span data-testid="revoke-limit">{REVOKE_LIMIT}</span></p>
+        {note !== undefined && <p role="alert" data-testid="revoke-input">{note}</p>}
+      </form>
+    </Panel>
   );
   // The answer keeps one place in the tree, so the reread that ends the approved state does not unmount it.
   return <>{approval !== null && (p.state === "approved" || p.state === "committed") ? form : null}<div ref={answer} tabIndex={-1} data-testid="revoke-answer"><Result w={w} done={recorded} /></div></>;

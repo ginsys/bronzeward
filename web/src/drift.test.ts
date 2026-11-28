@@ -107,7 +107,8 @@ const text = (testid: string) => box.querySelector(`[data-testid="${testid}"]`)?
 const links = () => [...box.querySelectorAll("a")];
 const linkTo = (href: string) => links().filter((a) => a.getAttribute("href") === href);
 const button = (label: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === label);
-const sections = () => [...box.querySelectorAll("section")].map((s) => s.getAttribute("aria-label"));
+// The choices: every panel but The change, which holds the record the choices decide (the console layout, ginsys/bronzeward#1261).
+const sections = () => [...box.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")).filter((l) => l !== "The change");
 const submit = (label: string, reason: string) =>
   act(async () => {
     const form = box.querySelector(`form[aria-label="${label}"]`)!;

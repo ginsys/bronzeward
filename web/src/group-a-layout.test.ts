@@ -220,7 +220,8 @@ describe("the Clusters list", () => {
 });
 
 describe("the operation page", () => {
-  test("a page header with the title, the note as the page note (one sentence, so no disclosure), and its panels and loose parts as before", async () => {
+  // Group A left the details and Attempts loose; group C (ginsys/bronzeward#1261) put each in a panel (`group-c1-layout.test.ts` pins them).
+  test("a page header with the title, the note as the page note (one sentence, so no disclosure), the Timeline panel, and Details and Attempts as panels", async () => {
     served[`/operations/${OP}`] = operation;
     await shown(h(OperationItem, { id: OP }));
     expect(box.children[0]!.classList.contains("page-head")).toBe(true);
@@ -231,8 +232,8 @@ describe("the operation page", () => {
     expect(text(box.querySelector('[data-testid="page-note"]'))).toBe(OPERATION_NOTE);
     expect(box.children[1]!.getAttribute("data-testid")).toBe("page-note");
     expect([...box.querySelectorAll(".panel > h3")].map(text)).toEqual(["Timeline"]);
-    expect(box.querySelector(":scope > dl")).not.toBeNull();
-    expect([...box.querySelectorAll(":scope > h3")].map(text)).toEqual(["Attempts"]);
+    expect([...box.querySelectorAll(":scope > section.panel > .panel-head > h3")].map(text)).toEqual(["Details", "Attempts"]);
+    expect(box.querySelectorAll(":scope > dl, :scope > h3")).toHaveLength(0);
   });
 });
 

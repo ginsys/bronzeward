@@ -87,11 +87,12 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head, s
 
 // `n` is bumped to read the item again.
 // `head` draws the title as the console layout's page header (layout.tsx); a page that is not built to the blocks yet keeps its h2.
-function ItemOf<T>({ path, what, title, children, n, onSettled, head = false }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void; head?: boolean }) {
+// `actions` are the page's header actions, drawn once the item is read.
+function ItemOf<T>({ path, what, title, children, n, onSettled, head = false, actions }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void; head?: boolean; actions?: (t: T) => ReactNode }) {
   const item = useItem<T>(path, undefined, n, onSettled);
   const pending = usePending(item, what);
   const t = item.kind === "ok" ? item.data : undefined;
-  return <>{head ? <PageHead heading={title(t)} /> : <h2>{title(t)}</h2>}{t === undefined ? pending : children(t)}</>;
+  return <>{head ? <PageHead heading={title(t)} actions={t === undefined ? undefined : actions?.(t)} /> : <h2>{title(t)}</h2>}{t === undefined ? pending : children(t)}</>;
 }
 
 type Row = readonly [string, ReactNode];
@@ -494,7 +495,8 @@ const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
 
 function ApplyItem({ id }: { id: string }) {
   return (
-    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={() => <>Apply release <Named id={id} /></>}>
+    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" head title={() => <>Apply release <Named id={id} /></>}
+      actions={(r) => <Ref to={`/releases/${encodeURIComponent(r.id)}`} id={r.id}>Back to the release</Ref>}>
       {(r) => <ApplyForm release={id} r={r} />}
     </ItemOf>
   );
@@ -559,15 +561,16 @@ export function PlanItem({ id }: { id: string }) {
   const onMachine = useCallback((m: S["MachineBody"] | null) => setMachine((was) => m ?? was ?? null), []);
   const held = (p: S["PlanBody"]): Held | undefined => (p.state === "approved" ? { body: machine === null ? null : machine?.id === p.machine ? machine : undefined } : undefined);
   return (
-    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} {...(held(p) !== undefined && { machine: held(p)! })} />)}>
+    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} head title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} {...(held(p) !== undefined && { machine: held(p)! })} />)}>
       {(p) => {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
           <>
-            <PageNote parts={[PLAN_NOTE]} />
+            <Note line={firstSentence(PLAN_NOTE)} parts={[PLAN_NOTE]} />
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
             <PlanState p={p} reread={reread} answers={answers} onMachine={onMachine} />
             <FrozenLine p={p} machine={held(p)?.body} />
+            <Panel title="Details" actions={<Ref to={`/operations?plan=${p.id}`} id={p.id}>Operations of this plan</Ref>}>
             <Fields rows={[
               ["State", `${safeWord(p.state)}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <ClusterLink id={p.cluster} />, route {safeWord(p.route)}</>],
@@ -579,14 +582,15 @@ export function PlanItem({ id }: { id: string }) {
               ["Committed operation", <Named id={p.committedOperation} />],
               ["Created", <>{when(p.createdAt)} by {by(p.createdBy)}</>],
             ]} />
-            <h3>Evidence</h3>
+            </Panel>
+            <Panel title="Evidence">
             <Fields rows={[
               ["Validation", `${safeWord(v.result)} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${safeWord(v.platformMode)})`],
               ["Dry run", dryRun.available ? "available" : `not available (${safeWord(dryRun.reason)})`],
               ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", release not applied yet"}{baseline.formOnly && `, ${DIFFERS_IN_FORM_ONLY.toLowerCase()}`}</>] as const]),
               ["Change", <Change p={p} />],
             ]} />
-            <p><Ref to={`/operations?plan=${p.id}`} id={p.id}>Operations of this plan</Ref></p>
+            </Panel>
             <ApproveControl p={p} reread={reread} />
             <ApprovalRecord p={p} />
             {p.state === "revoked" && <RevocationReason p={p} />}
@@ -654,15 +658,18 @@ export function OperationItem({ id }: { id: string }) {
         <>
           <Note line={firstSentence(OPERATION_NOTE)} parts={[OPERATION_NOTE]} />
           <OperationTimeline id={id} o={o} reread={reread} />
-          <Fields rows={[
-            ["Kind", safeWord(o.kind)], ["State", safeWord(o.state)], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],
-            ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />],
-            ...(isProblem(o.error) ? [] : ([["Error", <Record v={o.error} />]] as const)),
-          ]} />
-          {isProblem(o.error) && <ProblemRef e={o.error} />}
-          <h3>Attempts</h3>
-          {(o.attempts ?? []).length === 0 ? <p>No attempt recorded.</p>
-            : <Rows label="Attempts" cols={ATTEMPTS} items={o.attempts ?? []} keyOf={(a) => a.id} />}
+          <Panel title="Details">
+            <Fields rows={[
+              ["Kind", safeWord(o.kind)], ["State", safeWord(o.state)], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],
+              ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />],
+              ...(isProblem(o.error) ? [] : ([["Error", <Record v={o.error} />]] as const)),
+            ]} />
+            {isProblem(o.error) && <ProblemRef e={o.error} />}
+          </Panel>
+          <Panel title="Attempts">
+            {(o.attempts ?? []).length === 0 ? <p>No attempt recorded.</p>
+              : <Rows label="Attempts" cols={ATTEMPTS} items={o.attempts ?? []} keyOf={(a) => a.id} />}
+          </Panel>
         </>
       )}
     </ItemOf>

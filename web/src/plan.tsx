@@ -7,6 +7,7 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "re
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { PlanHostWaits } from "./host-waits.tsx";
+import { Panel } from "./layout.tsx";
 import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
 import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
@@ -300,11 +301,13 @@ export function CancelPlan({ id, reread }: { id: string; reread: () => void }) {
   };
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
   return (
-    <form onSubmit={submit} aria-label="Cancel plan">
-      <p><label>Reason <input name="reason" autoComplete="off" disabled={busy} /></label></p>
-      <p><Action label="Cancel plan" needs={["publisher", "approver", "recovery-admin"]} submit busy={busy} /> {CANCEL_NOTE}</p>
-      {note !== undefined && <p role="alert" data-testid="cancel-input">{note}</p>}
-      <Result w={w} done={() => "Cancellation recorded."} />
-    </form>
+    <Panel title="Cancel plan" label="Cancellation">
+      <form onSubmit={submit} aria-label="Cancel plan">
+        <p><label>Reason <input name="reason" autoComplete="off" disabled={busy} /></label></p>
+        <p><Action label="Cancel plan" variant="destructive" needs={["publisher", "approver", "recovery-admin"]} submit busy={busy} /> {CANCEL_NOTE}</p>
+        {note !== undefined && <p role="alert" data-testid="cancel-input">{note}</p>}
+        <Result w={w} done={() => "Cancellation recorded."} />
+      </form>
+    </Panel>
   );
 }

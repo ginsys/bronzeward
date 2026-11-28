@@ -10,7 +10,7 @@ import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { Id, Ref, short, useItem, useList, usePending, Detail, viewOf } from "./list.tsx";
 import { attribution, at, causes, driftReads, FROZEN, type Observation, latestUnread } from "./machine.tsx";
 import { type Machine, machineHeading } from "./machines.tsx";
-import { PageNote } from "./page-note.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { driftPath, REASON_MAX, planPath, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
 import { safeWord } from "./safe.ts";
@@ -39,8 +39,8 @@ export function driftId(path: string): string | undefined {
 function LinkAction({ label, to, id, needs }: { label: string; to: string; id: string; needs: readonly components["schemas"]["IdentityBody"]["roles"][number][] }) {
   const reason = useGate(needs);
   const why = useId();
-  if (reason === undefined) return <Ref to={to} id={id}>{label}</Ref>;
-  return <span><button type="button" disabled aria-describedby={why}>{label}</button><span id={why}> {reason}</span></span>;
+  if (reason === undefined) return <Ref to={to} id={id} button="outline">{label}</Ref>;
+  return <span><button type="button" className="outline" disabled aria-describedby={why}>{label}</button><span id={why}> {reason}</span></span>;
 }
 
 // [Freeze] or [Unfreeze]: a reason of 1 to REASON_MAX bytes, the control disabled without its role (a form's submit still
@@ -76,7 +76,7 @@ function Reasoned({ id, kind, show, finished }: { id: string; kind: "freeze" | "
       {show && (
         <form onSubmit={submit} aria-label={label}>
           <p><label>Reason (at most {REASON_MAX} bytes) <input name="reason" autoComplete="off" disabled={busy} /></label></p>
-          <p><Action label={label} needs={kind === "freeze" ? ["author", "publisher", "approver", "recovery-admin"] : ["approver"]} submit busy={busy} /></p>
+          <p><Action label={label} variant="secondary" needs={kind === "freeze" ? ["author", "publisher", "approver", "recovery-admin"] : ["approver"]} submit busy={busy} /></p>
           {note !== undefined && <p role="alert" data-testid={`${kind}-input`}>{note}</p>}
         </form>
       )}
@@ -129,19 +129,17 @@ export function DriftItem({ id }: { id: string }) {
   const read: Observation[] = obs.kind === "ok" ? obs.data.items : [];
   const open = d.openDrift !== null;
   const choice = (title: string, text: string, body?: ReactNode) => (
-    <section aria-label={title}>
-      <h3>{title}</h3>
+    <Panel title={title}>
       <p>{text}</p>
       {body}
-    </section>
+    </Panel>
   );
   return (
     <>
-      <h2>Change on the machine: {machineHeading(d)}</h2>
-      <Detail id={d.id} />
-      <PageNote parts={[DRIFT_NOTE, open && DRIFT_NOTE_OPEN]}> <Ref to={path} id={d.id}>Back to {machineHeading(d)}</Ref>.</PageNote>
+      <PageHead heading={<>Change on the machine: {machineHeading(d)}</>}><Detail id={d.id} secondary /></PageHead>
+      <Note line={firstSentence(DRIFT_NOTE)} parts={[DRIFT_NOTE, open && DRIFT_NOTE_OPEN]}> <Ref to={path} id={d.id}>Back to {machineHeading(d)}</Ref>.</Note>
       {obs.kind !== "ok" && po}
-      <Record m={d} obs={read} />
+      <Panel title="The change"><Record m={d} obs={read} /></Panel>
       {d.frozen && <Status testid="drift-frozen">{FROZEN}</Status>}
       {choice("Freeze", DRIFT_FREEZE, (
         <>

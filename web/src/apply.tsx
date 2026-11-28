@@ -9,9 +9,9 @@ import type { Assignment } from "./apply-shared.ts";
 import { SharedBlock } from "./apply-shared.tsx";
 import { Change } from "./change.tsx";
 import { Result, startsNew, useWrites } from "./forms.tsx";
+import { firstSentence, Note, Panel } from "./layout.tsx";
 import { Ref, useItem, useReads, useSettled } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
-import { PageNote } from "./page-note.tsx";
 import { poll } from "./plan.tsx";
 import { safeWord } from "./safe.ts";
 import { Who } from "./principals.tsx";
@@ -239,27 +239,28 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
 
   return (
     <>
-      <PageNote parts={[APPLY_NOTE]} />
-      <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
+      <Note line={firstSentence(APPLY_NOTE)} parts={[APPLY_NOTE]} />
       <SharedBlock r={r} assignments={assignments} />
-      <ul aria-label="Machines of this release">
-        {machines.map((m) => <Row key={m} release={release} machine={m} chosen={chosen.has(m)} choose={(on) => choose(m, on)} locked={busy} line={lines[m]} n={n} profiles={assignments?.[m]?.profiles} seen={see} settled={rowSettled} />)}
-      </ul>
-      {picked.some((m) => seen[m]?.role === "controlplane") && <p data-testid="apply-control-plane">{CONTROL_PLANE_NOTE}</p>}
-      {roles.some((x) => x === null) && <p data-testid="apply-no-role">{NO_ROLE_NOTE}</p>}
-      <p>
-        <Action label="Show apply" needs={["publisher"]} onClick={() => void show()} busy={busy || held || picked.length === 0} />
-        {picked.length === 0 && <span data-testid="apply-none"> Choose at least one machine.</span>}
-      </p>
-      {held && <p data-testid="apply-held">{LINES.held}</p>}
-      {picked.length > 0 && plans.size < picked.length && <p data-testid="apply-needs-publisher">{APPLY_NEEDS_PUBLISHER}</p>}
+      <Panel title="Machines of this release" label="The machine list">
+        <ul aria-label="Machines of this release">
+          {machines.map((m) => <Row key={m} release={release} machine={m} chosen={chosen.has(m)} choose={(on) => choose(m, on)} locked={busy} line={lines[m]} n={n} profiles={assignments?.[m]?.profiles} seen={see} settled={rowSettled} />)}
+        </ul>
+        {picked.some((m) => seen[m]?.role === "controlplane") && <p data-testid="apply-control-plane">{CONTROL_PLANE_NOTE}</p>}
+        {roles.some((x) => x === null) && <p data-testid="apply-no-role">{NO_ROLE_NOTE}</p>}
+        <p>
+          <Action label="Show apply" variant="secondary" needs={["publisher"]} onClick={() => void show()} busy={busy || held || picked.length === 0} />
+          {picked.length === 0 && <span data-testid="apply-none"> Choose at least one machine.</span>}
+        </p>
+        {held && <p data-testid="apply-held">{LINES.held}</p>}
+        {picked.length > 0 && plans.size < picked.length && <p data-testid="apply-needs-publisher">{APPLY_NEEDS_PUBLISHER}</p>}
+      </Panel>
       {plans.size > 0 && (
-        <section aria-label="Plans to approve">
+        <Panel title="Plans to approve">
           {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} onRead={markRead} onWithheld={handOff} />)}
           <p data-testid="apply-sentence">{APPLY_SENTENCE}</p>
           {unreadOnly && <p data-testid="apply-unread">{LINES.unreadPlan}</p>}
           <p><Action label="Apply" needs={["approver"]} onClick={() => void apply()} busy={busy || held || unread} /></p>
-        </section>
+        </Panel>
       )}
     </>
   );
