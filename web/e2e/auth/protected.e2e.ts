@@ -14,7 +14,7 @@
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
-import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmptyAfterPause } from "./helpers.ts";
+import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, itNarrow, mint, narrow, overflows, settled, storageControl, storageEmptyAfterPause } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -181,6 +181,8 @@ const sendMarks = () => $("section[aria-label=Marks]").$("button=Send marks").cl
 
 // Whether the review's or the document's text field is on the page, answered in the page as a boolean.
 const reviewShown = () => browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null);
+// The imported configuration's parsed fields, the default view of its document (ginsys/bronzeward#1270): held like the text, gone like the text.
+const fieldsShown = () => browser.execute(() => document.querySelector('[data-testid="config-fields"]') !== null);
 
 // Whether the page shows `text` anywhere, in its text or in the value of a field, answered in the page so
 // that the text never leaves it. A field's typed value is not part of the body's text.
@@ -272,6 +274,10 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
     await browser.url(base);
     await shows().$("button=Show imported configuration").click();
+    // The default view is the parsed fields, with no text area; the text is one press of Show raw text away.
+    await $('[data-testid="config-fields"]').waitForExist({ timeout: 20_000 });
+    await absent(reviewShown, "the text area before Show raw text was pressed");
+    await shows().$("button=Show raw text").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     await expect($('[data-testid="review-notice"]')).toHaveText(holds("PROTECTED DOCUMENT"));
     // Only a boolean crosses WebDriver: the text in the field is as long, in bytes, as the size the summary
@@ -296,13 +302,18 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The closed state's own control shows exactly when the text is gone (claim.tsx), so it marks the state.
     await shows().$("button=Show imported configuration").waitForExist({ timeout: 20_000, timeoutMsg: "the document was not closed" });
     await absent(reviewShown, "the document text after Close imported configuration");
+    await absent(fieldsShown, "the parsed fields after Close imported configuration");
+    // Opened again it is the parsed fields, whichever view was open when it was closed; the text is shown too, so that leaving drops both.
     await shows().$("button=Show imported configuration").click();
+    await $('[data-testid="config-fields"]').waitForExist({ timeout: 20_000 });
+    await shows().$("button=Show raw text").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     // A page load starts a sign-in again, whose state storage holds until it ends, so the page is read
     // only once it settled signed in (the check below measures storage, not a sign-in in flight).
     await browser.url(`${FIXTURE_PAGE}/`);
     await settled(FIXTURE_PAGE);
     await absent(reviewShown, "the document text after leaving the page");
+    await absent(fieldsShown, "the parsed fields after leaving the page");
     await storageEmptyAfterPause();
     await absent(() => cacheHolds(documentPath), "the document in the HTTP cache after leaving the page");
     // Another author, who did not import it, is refused by the server's rule and the page holds no text.
@@ -311,8 +322,34 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await shows().$("button=Show imported configuration").click();
     await expect(shows()).toHaveText(holds("The server did not show you this import's text. It shows a file import only to the person who imported it"), { wait: 20_000 });
     await absent(reviewShown, "the document text of a refused author");
+    await absent(fieldsShown, "the parsed fields of a refused author");
     await storageEmptyAfterPause();
     await absent(() => cacheHolds(documentPath), "the document in the HTTP cache after a refused author");
+    await cacheControl(at);
+  });
+
+  // The imported configuration page had no case at 320 CSS pixels, and its parsed fields hold long unbroken values (the document's token is
+  // the case's canary) and raw lines: each view, and the switch between them, must reflow with no sideways scroll (ginsys/bronzeward#1270).
+  itNarrow("PROT-07 at 320 CSS pixels: the parsed fields, the text after Show raw text and the fields again do not scroll the page sideways", async function () {
+    this.timeout(180_000);
+    expect(baseId).toMatch(/^ibr_/);
+    const shows = () => $('section[aria-label="Protected document"]');
+    expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
+    await browser.url(`${FIXTURE_PAGE}/import-base-revisions/${baseId}`);
+    await narrow(async () => {
+      await shows().$("button=Show imported configuration").click();
+      await $('[data-testid="config-fields"]').waitForExist({ timeout: 20_000 });
+      expect(["the parsed fields", await overflows()]).toEqual(["the parsed fields", 0]);
+      await shows().$("button=Show raw text").click();
+      await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
+      expect(["the text", await overflows()]).toEqual(["the text", 0]);
+      await shows().$("button=Show parsed fields").click();
+      await $('[data-testid="config-fields"]').waitForExist({ timeout: 20_000 });
+      expect(["the parsed fields again", await overflows()]).toEqual(["the parsed fields again", 0]);
+    });
+    await shows().$("button=Close imported configuration").click();
+    await absent(fieldsShown, "the parsed fields after Close imported configuration");
+    await storageEmptyAfterPause();
     await cacheControl(at);
   });
 

@@ -2,12 +2,14 @@
 // §11.3 and §11.4): the review fetched on demand and held in this page's memory only, and Continue,
 // Take over and Abandon as writes on the ingestion, and the marks (marks.tsx) sent from the review.
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
+import { ConfigFields } from "./config-fields.tsx";
 import { NO_ASSIST, startsNew, useSend, useWrites, Result } from "./forms.tsx";
 import { Panel } from "./layout.tsx";
 import { type Load, Ref, short, useReads, useSettled } from "./list.tsx";
 import { markSent, MarksPanel, markSpec } from "./marks.tsx";
+import { useParsedDocument } from "./parsed-document.ts";
 import { importPath } from "./router.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -219,11 +221,14 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
   const [text, setText] = useState<string>();
   const [why, setWhy] = useState<ReactNode>();
   const [reading, setReading] = useState(false);
+  // The default view is the parsed fields (docs/spec/configuration-editing.md §5); the switch shows the stored text as it is.
+  const [raw, setRaw] = useState(false);
   const [reads] = useState(newest);
   const drop = useCallback(() => {
     reads.drop();
     setReading(false);
     setText(undefined);
+    setRaw(false);
   }, [reads]);
   useEffect(() => discardOn(window, drop), [drop]);
   // Another import base is another text: nothing read for the old one stays.
@@ -241,9 +246,23 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
     else setWhy(failure(r.why));
   }, [reads, read, failure, id]);
   const { section, close } = useCloser(drop);
+  // The parsed view is derived from the held text and goes with it. The switch is offered only where there are fields.
+  const parsed = useParsedDocument(text, machine);
+  const fields = parsed?.state === "fields" && !raw;
+  const region = useRef<HTMLDivElement>(null);
+  const body =
+    parsed?.state === "reading" ? <Status testid="fields-status">Reading the fields.</Status>
+    : parsed?.state === "fields" && !raw ? <ConfigFields docs={parsed.docs} label={named} ref={region} />
+    : undefined;
+  const sentence = parsed?.state === "none" ? parsed.sentence : undefined;
+  const swap = parsed?.state === "fields" && <button type="button" className="outline" onClick={() => setRaw((r) => !r)}>{raw ? "Show parsed fields" : "Show raw text"}</button>;
   return (
-    <Panel title="Protected document" focus={section}>
-      {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" named={named} again={importPath({ machine })} />}
+    <Panel title="Protected document" focus={section} actions={swap}>
+      {text === undefined ? (
+        <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} />
+      ) : (
+        <Shown id={id} text={text} close={close} kind="document" named={named} again={importPath({ machine })} body={body} sentence={sentence} region={body === undefined ? undefined : { ref: region, ready: fields }} />
+      )}
       {why}
     </Panel>
   );
@@ -252,15 +271,19 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
 // The open review or document: the notice, the read-only text and the close button. Closing is a plain
 // button, not a gated action: it only drops what the page holds, so no role, connection or epoch state
 // may disable it.
-export function Shown({ id, text, close, marking, kind = "review", again, named = importedConfiguration(undefined) }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document"; again?: string; named?: string }) {
+//
+// A document may be shown as parsed fields in place of the text (`body`, with `region` as the focus target once it is
+// `ready`), or as the text under one sentence that says why there are no fields (`sentence`). The review is always the text.
+export function Shown({ id, text, close, marking, kind = "review", again, named = importedConfiguration(undefined), body, sentence, region }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document"; again?: string; named?: string; body?: ReactNode; sentence?: string | undefined; region?: { ref: RefObject<HTMLElement | null>; ready: boolean } | undefined }) {
   const doc = kind === "document";
-  // The button that opened it is gone: focus is on the text, with the marks and Close after it.
+  // The button that opened it is gone: focus is on the text, or on the parsed fields once they are drawn, with the marks and Close after it.
   const area = useRef<HTMLTextAreaElement>(null);
-  useFocusOn(true, area);
+  useFocusOn(region === undefined ? true : region.ready, region === undefined ? area : region.ref);
   return (
     <>
       <Status testid="review-notice">{doc ? "PROTECTED DOCUMENT" : "PROTECTED REVIEW"}. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
-      <p><label>{doc ? <span title={id}>{named}</span> : <>Review of import {short(id)}</>}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      {sentence !== undefined && <p data-testid="no-fields">{sentence}</p>}
+      {body ?? <p><label>{doc ? <span title={id}>{named}</span> : <>Review of import {short(id)}</>}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>}
       {doc && <p data-testid="ca-key-note">{CA_KEY_WORKER_NOTE}</p>}
       {marking && <MarksPanel text={text} send={marking.send} busy={marking.busy} />}
       {again !== undefined && <p data-testid="hide-note">A value found here that should be hidden cannot be marked on this import. <Ref to={again} id={again}>Import this machine again</Ref>, and put the value's path in Marks. This copy stays stored and readable as it is.</p>}
