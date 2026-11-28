@@ -6,12 +6,12 @@
 // What the schema does not describe is never dropped and never reordered. A key the schema lacks, a `$patch`
 // directive, an anchor or alias, a tag other than `!bwref`, a value of another type than the schema says, a choice
 // the schema does not list, and a document it cannot place each become an "other" row holding the raw lines of that
-// key, in document order. Comments are never read, so they never show. A value stored as `!bwref <name>` is the name
+// key, in document order. Comments are never read for a field and are cut from the raw rows, so they never show. A value stored as `!bwref <name>` is the name
 // only. The tree holds the stored values, so the page keeps it only as long as it keeps the text (claim.tsx).
 //
 // No secret list exists here: a value nobody marked is shown as text like any other (the notice above the view says so).
 
-import { isAlias, isMap, isScalar, isSeq, parseAllDocuments, type Document } from "yaml";
+import { isAlias, isMap, isScalar, isSeq, Parser, parseAllDocuments, type Document } from "yaml";
 import { legacyDef, noFormReasons, placeDocument, type FormSchema, type NoFormReason } from "./talos-schema.ts";
 
 /** What a field holds: text, a reference name, an object, a list of rows or a map of key and value rows. */
@@ -44,7 +44,22 @@ const isObj = (v: unknown): v is Sch => typeof v === "object" && v !== null && !
 const MAX_DEPTH = 16;
 const REF = "!bwref";
 
-type Ctx = { readonly text: string; readonly defs: Sch };
+// `comments` are the start and end offsets of every comment of the text, in order: the raw rows leave them out.
+type Ctx = { readonly text: string; readonly defs: Sch; readonly comments: readonly (readonly [number, number])[] };
+
+// Where the comments of the text are, from the parser's own tokens, so a `#` inside a quoted value, a plain value or a block
+// scalar is never taken for one.
+function commentSpans(text: string): [number, number][] {
+  const out: [number, number][] = [];
+  const walk = (t: unknown): void => {
+    if (Array.isArray(t)) return void t.forEach(walk);
+    if (!isObj(t)) return;
+    if (t["type"] === "comment" && typeof t["offset"] === "number" && typeof t["source"] === "string") out.push([t["offset"], t["offset"] + t["source"].length]);
+    for (const v of Object.values(t)) if (typeof v === "object") walk(v);
+  };
+  for (const tok of new Parser().parse(text)) walk(tok);
+  return out.sort((a, b) => a[0] - b[0]);
+}
 
 // The schema node a `$ref` names, with the referring node's own words (title, description) over the definition's.
 function resolve(s: unknown, defs: Sch): Sch | undefined {
@@ -68,15 +83,29 @@ const spanOf = (n: unknown): readonly [number, number] | undefined => {
   return Array.isArray(r) && typeof r[0] === "number" && typeof r[1] === "number" ? [r[0], r[1]] : undefined;
 };
 
-// Whole lines from the start of the line that holds `start` to the end of the line that holds the last character before `end`.
+// Whole lines from the start of the line that holds `start` to the end of the line that holds the last character before `end`,
+// without the comments: a comment line goes, and a trailing comment goes with the blank space before it. The default view hides
+// comments (docs/spec/configuration-editing.md section 5), and the text shown on request keeps them.
 // A block scalar ends where its own extent ends: the blank lines a keep-chomped one ("|+") holds are part of its value.
-function linesOf(text: string, start: number, end: number, exact = false): string {
+function linesOf(ctx: Ctx, start: number, end: number, exact = false): string {
+  const { text } = ctx;
   const from = text.lastIndexOf("\n", start - 1) + 1;
-  if (exact) return text.slice(from, text.charAt(end - 1) === "\n" ? end - 1 : end);
-  let e = end;
-  while (e > start && /\s/.test(text.charAt(e - 1))) e--;
-  const to = text.indexOf("\n", e);
-  return text.slice(from, to < 0 ? text.length : to);
+  let to = text.charAt(end - 1) === "\n" ? end - 1 : end;
+  if (!exact) {
+    let e = end;
+    while (e > start && /\s/.test(text.charAt(e - 1))) e--;
+    const nl = text.indexOf("\n", e);
+    to = nl < 0 ? text.length : nl;
+  }
+  const out: string[] = [];
+  let at = from;
+  for (const line of text.slice(from, to).split("\n")) {
+    const cut = ctx.comments.find(([a]) => a >= at && a <= at + line.length);
+    if (cut === undefined) out.push(line);
+    else if (text.slice(at, cut[0]).trim() !== "") out.push(text.slice(at, cut[0]).trimEnd());
+    at += line.length + 1;
+  }
+  return out.join("\n");
 }
 
 const isBlockScalar = (n: unknown): boolean => isScalar(n) && (n.type === "BLOCK_LITERAL" || n.type === "BLOCK_FOLDED");
@@ -192,7 +221,7 @@ function fieldsOf(ctx: Ctx, s: Sch, node: Pairs & { readonly flow?: boolean }, p
     }
     const from = spanOf(pair.key);
     const to = spanOf(pair.value) ?? from;
-    if (from !== undefined && to !== undefined) sink.push({ path: `${path}${key ?? "?"}`, lines: linesOf(ctx.text, from[0], to[1], isBlockScalar(pair.value)) });
+    if (from !== undefined && to !== undefined) sink.push({ path: `${path}${key ?? "?"}`, lines: linesOf(ctx, from[0], to[1], isBlockScalar(pair.value)) });
   }
   return fields;
 }
@@ -228,7 +257,7 @@ function docView(ctx: Ctx, s: FormSchema, d: Document.Parsed, n: number): DocVie
         at += line.length + 1;
       }
     }
-    return { heading: `Document ${n}`, fields: [], other: [{ path: "document", lines: linesOf(ctx.text, start, r[1]) }] };
+    return { heading: `Document ${n}`, fields: [], other: [{ path: "document", lines: linesOf(ctx, start, r[1]) }] };
   };
   if (!isMap(c) || marked(c)) return whole();
   const h = head(c);
@@ -252,7 +281,7 @@ export function buildConfigView(text: string, schema: FormSchema): ConfigView {
     const e = d.errors[0];
     if (e !== undefined) return { ok: false, code: e.code, line: e.linePos?.[0].line };
   }
-  const ctx: Ctx = { text, defs: schema.schema.$defs as unknown as Sch };
+  const ctx: Ctx = { text, defs: schema.schema.$defs as unknown as Sch, comments: commentSpans(text) };
   const docs: DocView[] = [];
   parsed.forEach((d, i) => {
     const v = docView(ctx, schema, d, i + 1);

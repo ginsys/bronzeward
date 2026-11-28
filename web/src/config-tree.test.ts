@@ -190,6 +190,29 @@ describe("what stays raw stays whole", () => {
   });
 });
 
+describe("comments are hidden in the raw rows too (docs/spec/configuration-editing.md section 5)", () => {
+  test("a comment line and a trailing comment are cut from the raw lines of a key the schema lacks", async () => {
+    const [d] = await docs("machine:\n  # commented example\n  network: # inline\n    # example\n    hostname: cp-1 # tail\n  type: worker\n");
+    expect(d!.other).toEqual([{ path: "machine/network", lines: "  network:\n    hostname: cp-1" }]);
+    expect(JSON.stringify(d)).not.toMatch(/example|inline|tail/);
+  });
+
+  test("a # inside a quoted value, a plain value and a block scalar is not a comment", async () => {
+    const [d] = await docs("machine:\n  a: 'x # y'\n  b: p#q\n  c: |\n    # kept\n    z\n  type: worker\n");
+    expect(d!.other.map((o) => o.lines)).toEqual(["  a: 'x # y'", "  b: p#q", "  c: |\n    # kept\n    z"]);
+  });
+
+  test("a comment inside a flow map is cut from its raw row", async () => {
+    const [d] = await docs("machine: {unknown: 1, # c\n  type: worker}\n");
+    expect(d!.other).toEqual([{ path: "machine", lines: "machine: {unknown: 1," + "\n  type: worker}" }]);
+  });
+
+  test("the raw lines of a whole document carry its properties and no comments", async () => {
+    const [d] = await docs("!custom\n# c\nmachine:\n  type: worker # t\n");
+    expect(d!.other).toEqual([{ path: "document", lines: "!custom\nmachine:\n  type: worker" }]);
+  });
+});
+
 describe("maps", () => {
   test("a map is rows of key and value, each value read by the schema's alternatives", async () => {
     const [d] = await docs("cluster:\n  etcd:\n    extraArgs:\n      listen-metrics-urls: http://0.0.0.0:2381\n      names: [a, b]\n");
