@@ -1826,7 +1826,8 @@ The fragment editor edits native YAML ([§12](#12-alternatives-and-recommendatio
 structured controls only for the layer, declarations, a profile's ordered list and an
 assignment's selections. **Amended on 28 November 2026:** the fragment editor and the display of an
 imported configuration get schema-driven forms and a parsed display, with the text box kept as a
-fallback; see choice C3 and [configuration editing](configuration-editing.md).
+fallback, on the owner's answer "A. Yes, amend it" and his hands-on test words "just a text box fo json,
+no forms" and "not parsed forms"; see choice C3 and [configuration editing](configuration-editing.md).
 
 ## 7. Role journeys
 
