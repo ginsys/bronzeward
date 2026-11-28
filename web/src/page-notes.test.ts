@@ -190,10 +190,11 @@ describe("the machine page through its own reads", () => {
 });
 
 // The draft page, the cluster page, the Clusters and Machines lists, the operation page, the six list pages (Drafts and releases, Plans,
-// Operations, Imports, Fragments and profiles, Audit), the plan page, the apply page, the drift page, the machine page, the release page and
-// the rendered review draw their note as one visible line with the full note behind "What is this page?" (client contracts §10.4 item 6,
+// Operations, Imports, Fragments and profiles, Audit), the plan page, the apply page, the drift page, the machine page, the release page,
+// the rendered review, the fragment, profile, assignment, revision, dependency, import and imported configuration pages draw their note as
+// one visible line with the full note behind "What is this page?" (client contracts §10.4 item 6,
 // ginsys/bronzeward#1255, ginsys/bronzeward#1257, ginsys/bronzeward#1259, ginsys/bronzeward#1261 and ginsys/bronzeward#1263;
-// `group-a-layout.test.ts`, `group-b-layout.test.ts`, `group-c1-layout.test.ts` and `group-c2-layout.test.ts` pin the
+// `group-a-layout.test.ts`, `group-b-layout.test.ts`, `group-c1-layout.test.ts`, `group-c2-layout.test.ts` and `group-c3-layout.test.ts` pin the
 // line of each); every other page's note is still shown whole under its title, as the tests above and below assert, and so is the plan page's
 // approval part, which stays whole inside the Approval panel. The full note's text is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary

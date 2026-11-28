@@ -809,6 +809,14 @@ describe("the read-only lists and items", () => {
       await $(`main tbody a[title="${s.frv.id}"]`).click();
       await expect($('[data-testid="document"]')).toBeExisting();
       expect(["the fragment revision", await overflows()]).toEqual(["the fragment revision", 0]);
+      // A dependency's page (built to the console layout blocks, ginsys/bronzeward#1263), by the first link to it in the dependencies table:
+      // its Details grid and its two tables in their panels must not widen the page.
+      await nav("Fragments and profiles");
+      await loaded();
+      await $(`(//main//a[@title="${s.dep.id}"])[1]`).click();
+      await expect($("main h2")).toHaveText(expect.stringContaining("Dependency"));
+      await loaded();
+      expect(["the dependency", await overflows()]).toEqual(["the dependency", 0]);
     });
   });
 });
