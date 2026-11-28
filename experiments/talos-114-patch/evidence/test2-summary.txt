@@ -115,71 +115,78 @@ FAIL
 VERIFY_SECONDS=318
 VERIFY_DONE rc=1
 run-cluster-job exit 1 finished 2026-11-28T18:42:28+01:00
+-- what each failing subtest printed (the line of protected_test.go and the lines under it, to the next test):
     protected_test.go:362: import start named no ingestion:
         stdout:
+        stderr:   started
+          talos-access
+        bronzewardctl: human (https://127.0.0.1:40023): import ing_cecffmhs4hgdt37puy57tkbyn4: its claim is held and its lease lapsed 17s ago, while operation op_h2mvarolp6go7oj26r7knfakrm still runs: the outcome is unknown. Read it again later, take it over, or abandon it:
+          bronzewardctl import status ing_cecffmhs4hgdt37puy57tkbyn4
+          bronzewardctl import takeover ing_cecffmhs4hgdt37puy57tkbyn4
+          bronzewardctl import abandon ing_cecffmhs4hgdt37puy57tkbyn4
+=== RUN   TestProtected/PROT-03
     protected_test.go:381: import start named no ingestion:
         stdout:
+        stderr: bronzewardctl: human (https://127.0.0.1:40023): POST /api/v1/ingestions answered 409 The resource refuses the act in its current state (conflict): an ingestion of this draft revision is running (instance req_2dli7xaq75emszjcqo7r45bquq)
+=== RUN   TestProtected/PROT-04
     protected_test.go:413: import start named no ingestion:
         stdout:
+        stderr: bronzewardctl: human (https://127.0.0.1:40023): POST /api/v1/ingestions answered 409 The resource refuses the act in its current state (conflict): an ingestion of this draft revision is running (instance req_fxbyqqveua5lqpdqh7mv7bf2du)
+=== RUN   TestProtected/PROT-05
     protected_test.go:437: import start named no ingestion:
         stdout:
+        stderr: bronzewardctl: human (https://127.0.0.1:40023): POST /api/v1/ingestions answered 409 The resource refuses the act in its current state (conflict): an ingestion of this draft revision is running (instance req_c6whwbl63ganupbaavxr7mojhm)
+=== RUN   TestProtected/PROT-06,_a_mark_and_the_serving_process_killed
     protected_test.go:456: import start named no ingestion:
         stdout:
+        stderr: bronzewardctl: human (https://127.0.0.1:40023): POST /api/v1/ingestions answered 409 The resource refuses the act in its current state (conflict): an ingestion of this draft revision is running (instance req_bvkdhp7sx2u6mfun6ng5fgj6cm)
+=== RUN   TestProtected/T3
+=== RUN   TestProtected/leak_scan
+=== NAME  TestProtected
+    cli_test.go:192: serve log:
+        listening on 127.0.0.1:42885
+        2026/11/28 17:38:53 ingestion ing_ozxq6oottjpdrxyo5wwiqlbode: paused for the operator's review
+-- durations of the three tests, the failed run then the passing run at the same variant (go test -v lines):
+failed run:  --- PASS: TestApprovals (70.79s)
+failed run:  --- PASS: TestDrift (44.31s)
+failed run:  --- FAIL: TestProtected (59.17s)
+passing run: --- PASS: TestApprovals (40.20s)
+passing run: --- PASS: TestDrift (8.79s)
+passing run: --- PASS: TestProtected (41.25s)
+Load on the node was not measured; the slower durations fit a loaded node and prove nothing about it.
 Then the Job created at 18:42 (verify-bronzeward-336b31c-1795887772-b94c6178) printed nothing for the 1800 s bound I gave it and was ended by it; the run above in this file (19:13) is the next one.
 
-== every skipped test of c-api with the reason it printed (skip lines: test, then the line before it)
-BW_E2E_NODE_OUT names no file: this test is the browser cases' Talos target
---- SKIP: TestE2ENode (0.00s)
-BW_E2E_SEED_DSN and BW_E2E_SEED_OUT unset: this is the browser harness's step
---- SKIP: TestE2ESeed (0.00s)
-BW_E2E_DRIFT_DSN and BW_E2E_DRIFT_MACHINE unset: this is the browser harness's step
---- SKIP: TestE2EDrift (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
---- SKIP: TestIdentityProviderRoles (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
---- SKIP: TestIdentityProviderRefresh (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
---- SKIP: TestIdentityProviderRevocation (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
---- SKIP: TestIdentityProviderEndSession (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
---- SKIP: TestIdentityProviderDevice (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
---- SKIP: TestIdentityProviderIDToken (0.00s)
+== every skipped test of c-api with the reason it printed after its own RUN line
+SKIP TestE2ENode: BW_E2E_NODE_OUT names no file: this test is the browser cases' Talos target
+SKIP TestE2ESeed: BW_E2E_SEED_DSN and BW_E2E_SEED_OUT unset: this is the browser harness's step
+SKIP TestE2EDrift: BW_E2E_DRIFT_DSN and BW_E2E_DRIFT_MACHINE unset: this is the browser harness's step
+SKIP TestIdentityProviderRoles: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+SKIP TestIdentityProviderRefresh: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+SKIP TestIdentityProviderRevocation: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+SKIP TestIdentityProviderEndSession: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+SKIP TestIdentityProviderDevice: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+SKIP TestIdentityProviderIDToken: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)
+skipped tests: 9
 
-== every skipped test of c-rest with the reason it printed (skip lines: test, then the line before it)
-dbus-daemon is not installed
---- SKIP: TestSecretServiceBounded (0.00s)
-dbus-daemon is not installed
---- SKIP: TestSecretServiceStoppedReader (0.00s)
-dbus-daemon is not installed
---- SKIP: TestSecretServiceDismissWaitsForCompleted (0.00s)
-dbus-daemon is not installed
---- SKIP: TestSecretServiceDismissNoAnswer (0.00s)
-dbus-daemon is not installed
---- SKIP: TestSecretServiceNeverPrompts (0.00s)
-no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp)
---- SKIP: TestLoginIdentityProvider (0.00s)
-    --- PASS: TestLogin/memory (1.25s)
-    --- SKIP: TestLogin/no_secret_service (0.00s)
-    --- SKIP: TestLogin/activatable_secret_service (0.00s)
-    --- SKIP: TestLogin/system_credential_store (0.00s)
-BW_BIN_DIR and BW_EXPECT_VERSION are not set: no packaged binaries to run
---- SKIP: TestPackagedVersion (0.00s)
-set by experiments/c10-machinery-gate/run/all
---- SKIP: TestMachineryGate (0.00s)
-set by experiments/c10-machinery-gate/run/all
---- SKIP: TestSensitivityGate (0.00s)
-BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
---- SKIP: TestLiveRead (0.00s)
-BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
---- SKIP: TestLiveApply (0.00s)
-BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
---- SKIP: TestLiveApplyLabelDocument (0.00s)
-BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
---- SKIP: TestLiveUnreachable (0.00s)
-BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
---- SKIP: TestLiveRoleProbe (0.00s)
+== every skipped test of c-rest with the reason it printed after its own RUN line
+SKIP TestSecretServiceBounded: dbus-daemon is not installed
+SKIP TestSecretServiceStoppedReader: dbus-daemon is not installed
+SKIP TestSecretServiceDismissWaitsForCompleted: dbus-daemon is not installed
+SKIP TestSecretServiceDismissNoAnswer: dbus-daemon is not installed
+SKIP TestSecretServiceNeverPrompts: dbus-daemon is not installed
+SKIP TestLoginIdentityProvider: no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp)
+SKIP TestLogin/no_secret_service: dbus-daemon is not installed
+SKIP TestLogin/activatable_secret_service: dbus-daemon is not installed
+SKIP TestLogin/system_credential_store: gnome-keyring-daemon is not installed
+SKIP TestPackagedVersion: BW_BIN_DIR and BW_EXPECT_VERSION are not set: no packaged binaries to run
+SKIP TestMachineryGate: set by experiments/c10-machinery-gate/run/all
+SKIP TestSensitivityGate: set by experiments/c10-machinery-gate/run/all
+SKIP TestLiveRead: BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+SKIP TestLiveApply: BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+SKIP TestLiveApplyLabelDocument: BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+SKIP TestLiveUnreachable: BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+SKIP TestLiveRoleProbe: BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+skipped tests: 17
 
 Reading of the skips: a test that needs a service the pod does not start (an identity provider, a Talos node, a D-Bus session,
 packaged binaries) skips as unavailable; TestE2E* belong to the browser harness; TestMachineryGate and TestSensitivityGate are
