@@ -64,7 +64,11 @@ func schemaAssetProblems(assetDir, moduleDir, pinned string, supported []string)
 		contracts = append(contracts, c)
 	}
 	sort.Strings(contracts)
-	minor, _ := contract.Minor(pinned)
+	minor, ok := contract.Minor(pinned)
+	if !ok {
+		// Without a minor no asset is compared with the module's file, so say so.
+		out = append(out, fmt.Sprintf("the pinned module version %q has no readable minor, so no asset is compared with the module's file", pinned))
+	}
 	for _, c := range contracts {
 		if !slices.Contains(supported, c) {
 			out = append(out, fmt.Sprintf("asset %s.json names a contract that is not on the supported list", c))
@@ -175,6 +179,8 @@ func TestSchemaAssetProblems(t *testing.T) {
 		{"id names another contract", file115, map[string]string{"v1.14.json": file115}, "v1.14.5", []string{"v1.14"}, `does not name contract v1.14`},
 		{"not json", file114, map[string]string{"v1.14.json": "{"}, "v1.14.5", []string{"v1.14"}, "does not parse"},
 		{"stray file", file114, map[string]string{"v1.14.json": file114, "notes.txt": "x"}, "v1.14.5", []string{"v1.14"}, "notes.txt is not a <contract>.json asset"},
+		// A pin whose minor cannot be read must not skip the digest check without a word.
+		{"pin with no readable minor", file114, map[string]string{"v1.14.json": file114 + "\n"}, "not-a-version", []string{"v1.14"}, "has no readable minor"},
 		// The pin moved on to v1.15: the module holds no v1.14 file, so the v1.14 asset is checked
 		// for existence and $id only.
 		{"older contract, pin moved on", file115, map[string]string{"v1.14.json": file114}, "v1.15.0", []string{"v1.14"}, ""},
