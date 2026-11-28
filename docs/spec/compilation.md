@@ -112,9 +112,12 @@ of §2.3 step 8 holds the imported value, and no identity decrypts it (choice
 it; and the rendered artifact carries it, encrypted under the artifact key for
 the executor, which decrypts it to apply it. It claims one thing: an import
 and the guard of §4.2 create no secret generation of the key, so the signer's
-path is the one stored source the compiler reads. Its limit is a copy an
-operator types into a draft update and marks: that run does not hold the key,
-so nothing compares the copy with it (§2.3 step 3a). A certificate the signer signs for a configuration read carries `os:admin`, the only role that reads a
+path is the one stored source the compiler reads. Its limit is a key an
+operator types into a draft update: that run does not hold the key, so nothing
+compares it with the stored key (§2.3 step 3a). The run extracts it like any
+schema secret, marked or not, into an ordinary create-only generation that
+stays; publication refuses the fragment as an override of the import base's
+reference (§6 step 7, choice §16.20). A certificate the signer signs for a configuration read carries `os:admin`, the only role that reads a
 machine configuration, so the "no machine operation" above is the application's
 own bound, a read-only Talos client, not one the provider or Talos enforces.
 
@@ -325,7 +328,11 @@ give a node a path that reads as an embedded document's.
    ([persistence and API §9.3](persistence-api.md#93-examples)).
    A run that does not offer the key does not hold it, so the guard cannot
    search for the key there: a copy an operator types into a draft update is
-   outside the guard, which finds exact copies of what the run holds.
+   outside the guard, which finds exact copies of what the run holds. The key
+   typed at `machine.ca.key` of a draft update is identified as a schema
+   secret, marked or not, and extracted into an ordinary generation at step 6;
+   a generation is create-only, so it stays, and publication refuses the
+   fragment (§6 step 7).
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document; the CA key of step 3a takes the typed
