@@ -92,8 +92,10 @@ generate as their input, never what a shipped binary writes.
 
 **Command:** `experiments/talos-114-patch/run/probe`, in one cluster Job. It builds A and C, runs
 [the probe](../../../experiments/talos-114-patch/probe/compile_probe_test.go.in) inside each
-build's `internal/compile`, A twice, and compares. A generates the input bytes; every build reads
-the same ones. Evidence: [`test1-probe.log`](../../../experiments/talos-114-patch/evidence/test1-probe.log)
+build's `internal/compile`, A twice, and compares. A generates the input bytes and every build reads
+the same ones; the three encryption inputs are rewritten first to the shapes the fixed generator
+writes (a provider kind of `aescbc` for the AES-CBC key, which A names `secretbox`), and the probe
+checks the kinds before it writes them (`secretbox`; `aescbc`; `secretbox,aescbc`). Evidence: [`test1-probe.log`](../../../experiments/talos-114-patch/evidence/test1-probe.log)
 (`VERIFY_DONE rc=0`).
 
 The 31 cases of each run are the ginsys/bronzeward#1212 probe's compositions (fragments, references
@@ -104,7 +106,8 @@ verdict, rule, path, redacted message, materialized or redacted digest, record d
 answer, hostname decision or Kubernetes version asked.
 
 **Controls:** A against its second run: no difference in the results and 0 of 46 key-path files
-(`keydiff compared=46 differing=0`). A changed label value gives another digest
+(`keydiff compared=46 differing=0 unmatched=0`; the comparison fails if it compares no file or
+leaves one unmatched). A changed label value gives another digest
 (`full-kubenode-labels`, `control-kubenode-other`).
 
 **Result.** C equals A in every compared item of the 28 composition and imported cases, including
@@ -116,11 +119,11 @@ four files of the 46, all from the build's own generation:
 | `gen-enc-aescbc.yaml`, `mat-own-enc-aescbc.yaml` | provider `secretbox` key `key1` at A, provider `aescbc` key `key1` at C |
 | `gen-enc-both.yaml`, `mat-own-enc-both.yaml` | the second provider, the same change |
 
-The four files are the §3 change. One more difference: the generated control-plane document with
-comments has another digest at C, while the comment-free output has the same digest. The likely
-cause is version-dependent comment text (the default etcd version moved from v3.7.3 to v3.7.4, and
-`v1alpha1_etcdconfig.go` builds the default image from it); **this is inferred and was not
-isolated**. It is test input only (§3).
+The four files are the §3 change. Four more differences: the generated control-plane and worker
+documents, under the v1.14 contract and under the library's default, have another digest with
+comments at C, while the comment-free output has the same digest. The cause was not isolated and
+none is claimed: the module's default versions moved (§3), and the commented output may carry
+version-dependent text. It is test input only (§3).
 
 ## 5. Test 3: the existing tests
 
@@ -139,16 +142,22 @@ Jobs in profile `go-db` (PostgreSQL and OpenBao), one at a time. Evidence:
 The three fail because their golden transcripts (`internal/clitest/testdata/journeys/t3.txt`,
 `t8.txt`, `t10.txt`) hold `machinery v1.14.5` nine times (3, 2 and 4), and the run prints
 `machinery v1.14.7`. The `goldens` set rewrites exactly that string in the export and the tests pass;
-at A they pass unchanged. Skips are environment skips (no `dbus-daemon` or `gnome-keyring-daemon`
-in the pod, no test identity provider, no Talos node, no packaged binaries): 17 in the rest set and
-9 in `internal/api`, each with its reason in the summary.
+at A they pass unchanged (both reruns check that the three tests ran and passed). The skips are 17
+in the rest set and 9 in `internal/api`, each with the reason it printed in the summary: services the
+pod does not start (no `dbus-daemon` or `gnome-keyring-daemon`, no test identity provider, no Talos
+node, no packaged binaries); the browser harness's own steps (`TestE2E*`, three in `internal/api`);
+and two tests, `TestMachineryGate` and `TestSensitivityGate`, which are left to their own script
+(`experiments/c10-machinery-gate/run/all`) and are not run in a Go test run at A either.
 
 The web console reads the Talos config schema from `web/src/talos-schema/v1.14.json`.
 `TestWebSchemaAssets` passes at C; read directly, the asset and the module's
 `config/schemas/config.schema.json` at v1.14.5 and v1.14.7 have the same SHA-256
 (`5d83e2f7…c4822a`), so `mise run web-schema` makes no change.
 
-No test that calls `generate.NewInput` failed at C.
+Three of the tests that reach `generate.NewInput` (all through `newStandIn`,
+`internal/clitest/publication_test.go:77`) failed at C. Their failure is the golden
+string above, which the rewrite clears; no failure traces to the generator change. Whether the
+other tests that generate their input at C depend on the provider kind was not isolated: they pass.
 
 ## 6. Test 4: the fixture chain
 
@@ -158,7 +167,10 @@ export of `d8c4ba52`, with `go.mod` and `fixtures/versions.env` edited and commi
 host Docker through the host test queue, one chain at a time. The `/home` floor of 20480 MiB was
 read before each (37028, 33334 and 37587 MiB available) and each chain's evidence was
 trimmed to its logs and result tables before the next. A control-plane encryption change was not
-applied to any node, and none ran on a real cluster.
+applied to any node, and none ran on a real cluster. Each chain's `prepared.txt` in the evidence
+holds the script's own record of the run: the free-space reading, the four Talos lines of
+`fixtures/versions.env`, the machinery line of the chain's `go.mod` as committed in the scratch
+checkout, and that checkout's commit. The scratch checkouts were deleted with the chains.
 
 | Chain | Server | Node image and `talosctl` | Result | Time |
 |---|---|---|---|---|
@@ -181,7 +193,8 @@ path no shipped binary reaches. The edits, which this report does not make:
 1. `go.mod`: `github.com/siderolabs/talos/pkg/machinery v1.14.7`; `golang.org/x/net v0.62.0` and
    `golang.org/x/text v0.43.0` (direct), `golang.org/x/crypto v0.58.0` and `golang.org/x/sync
    v0.24.0` (indirect). `golang.org/x/sys` stays at v0.49.0.
-2. `go.sum`: run `go mod tidy` with the checksum database on. It writes the machinery lines
+2. `go.sum`: run `go mod tidy` with the checksum database on. In the export of build C it wrote
+   ([`export-go-diff.txt`](../../../experiments/talos-114-patch/evidence/export-go-diff.txt)) the machinery lines
    `h1:LHw7vZO2hUSTYW4NRQVX8gLHsg8Odw7OSUXP7t+BEdQ=` and `/go.mod h1:Xpqf4j02CiOuRUhUIfSAmjZncZ4qw/7JziUC6ZoiIxs=`
    and the `x/crypto`, `x/net`, `x/sync`, `x/text` and `x/tools` (v0.48.0 to v0.51.0) lines for the new versions.
 3. `fixtures/versions.env`: `TALOS_VERSION=v1.14.7`;
@@ -216,4 +229,7 @@ v1.14.5 node; it was not rerun here and stays a v1.14.5 claim until it is.
   digest and the release checksums were read from the registry and release page on 28 November 2026.
 - The `go.sum` lines of §7 are those `go mod tidy` wrote in the export; the implementation writes
   its own.
+- The `build`, `api` and `rest` sets at C ran with the first revision of `run/build` and
+  `run/test2`, which differs from the committed one only in the `goldens` set and in the checksum
+  database refusal for build A. The probe and the two `goldens` runs are from the committed revision.
 - The upstream release notes of v1.14.6 and v1.14.7 were not read; the diff of the module is.
