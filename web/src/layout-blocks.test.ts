@@ -150,6 +150,9 @@ describe("the stylesheet", () => {
     expect(css).toContain("th.action { position: relative; }");
     expect(css).toMatch(/\.sr-only \{ position: absolute;/);
   });
+  test("a filter a link pinned (a paragraph in the toolbar) has no margin and may shrink and wrap, so a long name cannot widen the page at 320 px", () => {
+    expect(css).toContain(".toolbar > p { min-width: 0; margin: 0; overflow-wrap: anywhere; }");
+  });
   test("an editor draws its box by padding and has no margin rule on its children, so a field as wide as its parent cannot scroll the page sideways", () => {
     const rule = css.split("\n").find((l) => l.startsWith("section.editor {"))!;
     expect(rule).toContain("padding: 0 var(--s4) var(--s4)");

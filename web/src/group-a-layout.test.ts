@@ -10,9 +10,9 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { firstSentence } from "./layout.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
-import { OperationItem, Operations, Plans } from "./resources.tsx";
+import { OperationItem } from "./resources.tsx";
 import { type Role, ShellContext } from "./shell.tsx";
-import { ABOUT_PAGE, CLUSTER_NOTE, CLUSTERS_NOTE, MACHINES_NOTE, OPERATION_NOTE, OPERATIONS_NOTE, PLANS_NOTE } from "./words.ts";
+import { ABOUT_PAGE, CLUSTER_NOTE, CLUSTERS_NOTE, MACHINES_NOTE, OPERATION_NOTE } from "./words.ts";
 import { WritesProvider } from "./forms.tsx";
 import { Writes } from "./write.ts";
 
@@ -233,17 +233,6 @@ describe("the operation page", () => {
     expect([...box.querySelectorAll(".panel > h3")].map(text)).toEqual(["Timeline"]);
     expect(box.querySelector(":scope > dl")).not.toBeNull();
     expect([...box.querySelectorAll(":scope > h3")].map(text)).toEqual(["Attempts"]);
-  });
-});
-
-describe("the note rule reaches these four pages and no other", () => {
-  test("Plans and Operations keep the whole note visible under the title, with no disclosure", async () => {
-    for (const [page, note] of [[h(Plans, { query: "", go: () => {} }), PLANS_NOTE], [h(Operations, { query: "", go: () => {} }), OPERATIONS_NOTE]] as const) {
-      await shown(page);
-      expect(text(box.querySelector('[data-testid="page-note"]')).startsWith(note)).toBe(true);
-      expect(box.querySelector("details.about")).toBeNull();
-      expect(box.querySelector(".page-head")).toBeNull();
-    }
   });
 });
 

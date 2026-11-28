@@ -776,6 +776,13 @@ describe("the read-only lists and items", () => {
       await expect($("main").$("h3=Machines")).toBeDisplayed({ wait: 20_000 });
       await loaded();
       expect(["the cluster", await overflows()]).toEqual(["the cluster", 0]);
+      // The lists that are not read through an item below (built to the console layout blocks, ginsys/bronzeward#1259): the page header, the
+      // toolbar row and the panels must not widen the page either.
+      for (const page of ["Drafts and releases", "Imports", "Audit"]) {
+        await nav(page);
+        await loaded();
+        expect([page, await overflows()]).toEqual([page, 0]);
+      }
       for (const [page, item, title] of [["Plans", s.plan.id, "Plan"], ["Fragments and profiles", s.frg.id, "Fragment"], ["Operations", s.op.id, "Operation"]] as const) {
         await nav(page);
         await loaded();

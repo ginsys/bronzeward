@@ -2399,11 +2399,13 @@ the client's rule wins wherever the two meet.
    list and the operation page draw theirs the same way
    ([ginsys/bronzeward#1257](https://github.com/ginsys/bronzeward/issues/1257)): the line is the first sentence of the page's note,
    and a note of one sentence (the operation page's) is its own line, so it is drawn as the plain page note with no disclosure. The
-   other pages follow in their own pull requests and show the whole note under the title until then: Drafts and releases, Plans,
-   Operations, Imports, Fragments and profiles, Audit, a machine, a plan, a release and its review, a fragment, a profile or an
+   six list pages draw theirs the same way ([ginsys/bronzeward#1259](https://github.com/ginsys/bronzeward/issues/1259)): Drafts and
+   releases, Plans, Operations, Imports, Fragments and profiles and Audit show the first sentence of the page's note as the line, and
+   the whole note, with the link Plans' note carries, behind the disclosure. The other pages follow in their own pull requests and show
+   the whole note under the title until then: a machine, a plan, a release and its review, a fragment, a profile or an
    assignment and its revisions, a dependency, an import and its configuration, a publication, an apply, a drift, the forms (Create
    draft, Start import, Plan new, Add machine, Enter a cluster by hand, Connect a cluster, the approval and scope decisions) and the
-   recovery pages. `web/src/page-notes.test.ts` and `web/src/group-a-layout.test.ts` pin both sets.
+   recovery pages. `web/src/page-notes.test.ts`, `web/src/group-a-layout.test.ts` and `web/src/group-b-layout.test.ts` pin both sets.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:

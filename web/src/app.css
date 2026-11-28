@@ -114,6 +114,7 @@ h1 .icon, button .icon { margin-inline-end: var(--s2); }
 .toolbar button { margin: 0; }
 .toolbar > span { display: inline-flex; align-items: center; gap: var(--s2); }
 .toolbar > span > span { color: var(--muted-foreground); }
+.toolbar > p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .toolbar .alert { flex-basis: 100%; margin: 0; }
 
 /* A page's section is a bordered panel with a header band. */
@@ -134,7 +135,7 @@ tbody tr:hover { background-color: var(--muted); }
 pre.diff { overflow: auto; max-width: 100%; }
 
 /* Console layout blocks (docs/design/console-layout.md §2.9, ginsys/bronzeward#1255): the page header, the panel band with actions,
-   the reading width, the action hierarchy and the table helpers. The draft page, the cluster page, the Clusters and Machines lists and the operation page use them so far. */
+   the reading width, the action hierarchy and the table helpers. The draft page, the cluster page, the Clusters and Machines lists, the operation page and the six list pages use them so far. */
 /* Reading width */
 /* Scoped to a page that has the page header, so a page that does not use the blocks yet keeps its text width (the design's
    rule is for every page; each page takes it when it is built to the blocks). */

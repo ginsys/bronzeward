@@ -1,0 +1,2 @@
+Changed
+- The web console's Drafts and releases, Plans, Operations, Imports, Fragments and profiles and Audit pages use the console layout blocks: a page header (Create draft and Start import are the one filled button of their pages), the note as one line with the whole note behind "What is this page?", and each table in a bordered panel with the filters on top. The words stay. Refs ginsys/bronzeward#1259.

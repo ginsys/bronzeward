@@ -188,10 +188,11 @@ describe("the machine page through its own reads", () => {
   });
 });
 
-// The draft page, the cluster page, the Clusters and Machines lists and the operation page draw their note as one visible line
-// with the full note behind "What is this page?" (client contracts §10.4 item 6, ginsys/bronzeward#1255 and ginsys/bronzeward#1257;
-// `group-a-layout.test.ts` pins the four of group A, and that every other page shows its note whole); every other page's note is
-// still shown whole under its title, as the tests above and below assert. The full note's text is the page-note element inside the disclosure, so its parts are asserted
+// The draft page, the cluster page, the Clusters and Machines lists, the operation page and the six list pages (Drafts and releases, Plans,
+// Operations, Imports, Fragments and profiles, Audit) draw their note as one visible line with the full note behind "What is this page?"
+// (client contracts §10.4 item 6, ginsys/bronzeward#1255, ginsys/bronzeward#1257 and ginsys/bronzeward#1259; `group-a-layout.test.ts` and
+// `group-b-layout.test.ts` pin the line of each); every other page's note is still shown whole under its title, as the tests above and
+// below assert. The full note's text is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
 // action), the visible line and the disclosure's summary.
 describe("the draft page's note, a part only where its control shows", () => {
