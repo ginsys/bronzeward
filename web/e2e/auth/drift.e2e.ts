@@ -11,7 +11,7 @@ import { SCOPE_NO_MODE } from "../../src/states.tsx";
 import { DRIFT_NONE } from "../../src/words.ts";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { INJECTED_SCOPE, type Faults } from "../injector.ts";
-import { absent, answers, api, fixtureSignIn, fromTitle, itNarrow, measure, narrow, overflows, references, seeded, storageEmpty, tab, type Seed, where, writes } from "./helpers.ts";
+import { absent, answers, api, fixtureSignIn, fromTitle, itNarrow, measure, narrow, overflows, references, seeded, storageEmpty, tab, tabTo, type Seed, where, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const CONTROLS = 'main a[href], main button, main input, main select, main textarea, main [tabindex="0"]';
@@ -173,6 +173,12 @@ describe("the drift page (#363)", () => {
     await openDrift();
     await driftPage();
     await expect($('[data-testid="drift-record"]')).toBeExisting();
+    // The note's "What is this page?" is a closed disclosure, and the link back to the machine is inside it: a person opens it by
+    // keyboard (Enter on its summary), and only then is that link a control Tab reaches (ginsys/bronzeward#1261).
+    await fromTitle();
+    await tabTo((f) => f.tag === "SUMMARY", "the note's disclosure");
+    await browser.keys("Enter");
+    expect(await browser.execute(() => document.querySelector<HTMLDetailsElement>("details.about")?.open === true)).toBe(true);
     const total = await browser.execute((sel: string) => {
       const all = [...document.querySelectorAll(sel)];
       all.forEach((e, i) => e.setAttribute("data-t10", String(i)));
