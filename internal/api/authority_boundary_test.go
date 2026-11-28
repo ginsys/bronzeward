@@ -44,10 +44,16 @@ func authorityState(t *testing.T, db *sql.DB) map[string]string {
 	for rows.Next() {
 		var n string
 		if err := rows.Scan(&n); err != nil {
+			rows.Close()
 			fatalf(t, "%v", err)
 			return got
 		}
 		names = append(names, n)
+	}
+	if err := rows.Err(); err != nil { // a cut list would compare fewer tables and pass
+		rows.Close()
+		fatalf(t, "%v", err)
+		return got
 	}
 	rows.Close()
 	for _, tb := range names {
@@ -62,13 +68,19 @@ func authorityState(t *testing.T, db *sql.DB) map[string]string {
 	return got
 }
 
-// wantSameState fails for each table whose rows differ from before.
+// wantSameState fails for each table whose rows differ from before, and for a table that is in
+// one read and not in the other.
 func wantSameState(t *testing.T, db *sql.DB, before map[string]string, what string) {
 	t.Helper()
 	after := authorityState(t, db)
 	for tb, v := range after {
-		if before[tb] != v {
-			t.Errorf("%s changed %s: %s, then %s", what, tb, before[tb], v)
+		if w, ok := before[tb]; !ok || w != v {
+			t.Errorf("%s changed %s: %q, then %q", what, tb, w, v)
+		}
+	}
+	for tb, w := range before {
+		if _, ok := after[tb]; !ok {
+			t.Errorf("%s: the table %s was read before and not after (%q)", what, tb, w)
 		}
 	}
 }
