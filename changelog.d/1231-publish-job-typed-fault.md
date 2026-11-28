@@ -1,0 +1,2 @@
+Fixed
+- A publication that meets an error which is a function of stored data (a stored source ingestion no longer accepts, a stored mode, a machine's records, the build's machinery record) now ends the operation `failed` with `500 internal-error` on its first claim, instead of being claimed again until a person enters recovery mode; the draft takes edits again. Errors of the database, the clock, the context and the providers still leave the job to its lease. Refs ginsys/bronzeward#1231.

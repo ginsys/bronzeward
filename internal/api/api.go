@@ -160,6 +160,7 @@ type options struct {
 	afterStage     func()                                                                               // runs when a job is staged, before T1
 	beforeT1       func()                                                                               // runs before T1 begins
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would
+	fault          func(site string) error                                                              // a test's error at a publication build's typed site (a.fault); nil in production
 	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
 	resolve        func(ctx context.Context, endpoint string) (addr, name string, err error)            // discover.ResolveEndpoint by default: a discovery's endpoint name, resolved once
 	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default

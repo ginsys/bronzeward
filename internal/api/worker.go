@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -172,6 +173,14 @@ func (a *API) runPublish(ctx context.Context, j publishJob) {
 		return
 	}
 	u, ref, err := a.buildRelease(ctx, j, *a.d.pub)
+	var bf *buildFault
+	if errors.As(err, &bf) && ctx.Err() == nil {
+		// A retry would meet the same stored data, so the operation fails rather than staying
+		// running (as publish.go does for a constraint); the cause is logged and the problem names no value.
+		a.o.logf("publication %s: %v", j.op, err)
+		ref, err = refuse(http.StatusInternalServerError, "internal-error",
+			"the release could not be built from stored data; "+noRelease), nil
+	}
 	switch {
 	case ctx.Err() != nil:
 		a.o.logf("publication %s: stopped before the publication commit", j.op)
@@ -190,6 +199,29 @@ func (a *API) runPublish(ctx context.Context, j publishJob) {
 	if _, _, err := a.publishCommit(ctx, j, u); err != nil {
 		a.o.logf("publication %s: the publication commit: %v", j.op, err)
 	}
+}
+
+// buildFault is an error of the publication build that is a pure function of stored data: every
+// claim of the job would meet it again (the stored source ingestion refuses, the stored mode, the
+// node-name claim, the machine's records, the build's machinery record). The database, the clock,
+// the context and the providers raise untyped errors, which keep the job to its lease.
+type buildFault struct{ err error }
+
+func (f *buildFault) Error() string { return f.err.Error() }
+func (f *buildFault) Unwrap() error { return f.err }
+
+// fault types err, as the publication build's site reports it, a buildFault; a test's error at
+// the site (options.fault) replaces it. A nil error stays nil.
+func (a *API) fault(site string, err error) error {
+	if a.o.fault != nil {
+		if e := a.o.fault(site); e != nil {
+			err = e
+		}
+	}
+	if err == nil {
+		return nil
+	}
+	return &buildFault{err}
 }
 
 // publishHeartbeat extends j's lease until ctx ends; an extension the fence refuses stops the run.

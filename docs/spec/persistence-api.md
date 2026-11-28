@@ -1639,7 +1639,9 @@ provider's error behind such a read, encryption or unreachable provider is
 logged with the operation. A stored source that ingestion's own well-formedness
 checks no longer accept is the server's error (`500`), not a refusal:
 persistence stores only what ingestion produced and checked, so it means the
-stored text and its reference rows disagree. No refusal holds a value.
+stored text and its reference rows disagree. The publication ends there: the
+operation is `failed` with `500 internal-error` on its first claim, since a claim
+again would meet the same stored data. No refusal holds a value.
 
 The publication observation check (§6.1.1) precedes these pinned-value and
 compilation steps. If a provider-wide outage prevents the Talos access read,
@@ -1939,7 +1941,7 @@ on the list of supported contracts and not newer than the minor of the machinery
 module the server was built with; the machinery
 version and checksum are that build's own record of the module, and a build
 that does not record them, or holds a replaced module, cannot publish (a server
-fault, `500`); the Kubernetes version is the kubelet image tag of every covered
+fault, `500`: the operation is `failed`, not claimed again); the Kubernetes version is the kubelet image tag of every covered
 machine's validated configuration, which must agree across them and lie in the
 `SupportedWith` window of the cluster's contract. A refused contract or Kubernetes version is
 `422 validation-failed`, naming the rule and the check, never the image or a path
@@ -4684,6 +4686,8 @@ or Desired change; it does not erase earlier evidence.
 | Publish | Commit-unknown | resolved by reading the natural key | the release once, with its original evidence links; any earlier observations |
 | Publish | Deadlock retries exhausted, `COMMIT` rejected (a deferred constraint), or a statement breaking an integrity constraint (a release machine whose mode is not its machine's platform, for one) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
 | Publish | Compiled release disagrees with its sources' reference declarations or text digests | operation `failed`, `500 internal-error`; the clause logged | operation, act |
+| Publish | A stored source ingestion's checks no longer accept, a stored platform mode no build knows, a machine's node-name claim or records that cannot be built from its compiled configuration, or a build that records no machinery module (§6.1, §6.2): an error that is a function of stored data, so every claim would meet it | operation `failed` on its first claim, `500 internal-error` with fixed text naming no value; the cause logged; the draft takes edits again | operation, act |
+| Publish | An error of the database, the clock, the context or a provider while the job builds the release, a process killed before its commit | the operation stays `running`; its lease lapses and the job is claimed again (§8.2) | the other worker's result; any earlier observation starts/results |
 | Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result; any earlier observation starts/results |
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
