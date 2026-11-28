@@ -1,0 +1,2 @@
+Changed
+- The web console's plan page, apply page, drift page and the operation page's details and Attempts use the console layout blocks: a page header, the note as one line with the whole note behind "What is this page?", and each section in a bordered panel. Approve and Apply are the one filled button of their pages, the drift page has none, and Revoke approval and Cancel plan are outlined red in a panel of their own at the end. The words stay and every control does what it did. Refs ginsys/bronzeward#1261.

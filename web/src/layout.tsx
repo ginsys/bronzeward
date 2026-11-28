@@ -1,18 +1,19 @@
 // The layout blocks of the console layout design (docs/design/console-layout.md §2, ginsys/bronzeward#1255): a panel with a titled
 // band, a page header with the page's actions, and a note drawn as one visible line with the whole note behind a native
 // disclosure. The action variants are Action's (shell.tsx). The draft page, the cluster page, the Clusters and Machines lists, the
-// operation page (ginsys/bronzeward#1257) and the six list pages (ginsys/bronzeward#1259) use them so far; the stylesheet is app.css,
-// "Console layout blocks".
+// operation page (ginsys/bronzeward#1257), the six list pages (ginsys/bronzeward#1259) and the plan, apply, drift and operation item
+// pages (ginsys/bronzeward#1261) use them so far; the stylesheet is app.css, "Console layout blocks".
 
 import type { ReactNode } from "react";
 import { PageNote } from "./page-note.tsx";
 import { ABOUT_PAGE } from "./words.ts";
 
 // A panel holds one thing. Its band has the title on the left and the panel's actions on the right, so an action sits under the
-// heading it belongs to. `label` names the section for a screen reader and a test where it differs from the title.
-export function Panel({ title, actions, label = title, children }: { title: string; actions?: ReactNode; label?: string; children?: ReactNode }) {
+// heading it belongs to. `label` names the section for a screen reader and a test where it differs from the title; `testid` keeps a
+// browser case's selector where the section had one before it was a panel.
+export function Panel({ title, actions, label = title, testid, children }: { title: string; actions?: ReactNode; label?: string; testid?: string; children?: ReactNode }) {
   return (
-    <section className="panel" aria-label={label}>
+    <section className="panel" aria-label={label} {...(testid !== undefined && { "data-testid": testid })}>
       <div className="panel-head">
         <h3>{title}</h3>
         {actions !== undefined && actions !== false && <div className="actions">{actions}</div>}

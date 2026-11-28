@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { CreateDraft, DraftItem, settledFragment } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { HANDOVER_TITLE } from "./handover.ts";
+import { firstSentence } from "./layout.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { MachineItem, MachineShown } from "./machine.tsx";
 import { PlanNew } from "./plan.tsx";
@@ -188,11 +189,12 @@ describe("the machine page through its own reads", () => {
   });
 });
 
-// The draft page, the cluster page, the Clusters and Machines lists, the operation page and the six list pages (Drafts and releases, Plans,
-// Operations, Imports, Fragments and profiles, Audit) draw their note as one visible line with the full note behind "What is this page?"
-// (client contracts §10.4 item 6, ginsys/bronzeward#1255, ginsys/bronzeward#1257 and ginsys/bronzeward#1259; `group-a-layout.test.ts` and
-// `group-b-layout.test.ts` pin the line of each); every other page's note is still shown whole under its title, as the tests above and
-// below assert. The full note's text is the page-note element inside the disclosure, so its parts are asserted
+// The draft page, the cluster page, the Clusters and Machines lists, the operation page, the six list pages (Drafts and releases, Plans,
+// Operations, Imports, Fragments and profiles, Audit), the plan page, the apply page and the drift page draw their note as one visible line
+// with the full note behind "What is this page?" (client contracts §10.4 item 6, ginsys/bronzeward#1255, ginsys/bronzeward#1257,
+// ginsys/bronzeward#1259 and ginsys/bronzeward#1261; `group-a-layout.test.ts`, `group-b-layout.test.ts` and `group-c1-layout.test.ts` pin the
+// line of each); every other page's note is still shown whole under its title, as the tests above and below assert, and so is the plan page's
+// approval part, which stays whole inside the Approval panel. The full note's text is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
 // action), the visible line and the disclosure's summary.
 describe("the draft page's note, a part only where its control shows", () => {
@@ -369,6 +371,10 @@ describe("the plan page's note", () => {
     const all = notes().map((n) => n.textContent);
     expect(all).toEqual([PLAN_NOTE, PLAN_NOTE_APPROVE]);
     underTheTitle(notes()[0]!);
+    // The always part is the whole note behind the disclosure (its first sentence is the visible line); the approval part is not behind it.
+    expect(box.querySelector('[data-testid="page-note-line"]')!.textContent).toBe(firstSentence(PLAN_NOTE));
+    expect(box.querySelector("details.about")!.contains(notes()[0]!)).toBe(true);
+    expect(box.querySelector("details.about")!.contains(notes()[1]!)).toBe(false);
     expect(box.querySelector('section[aria-label="Approval"]')!.contains(notes()[1]!)).toBe(true);
     // The page is the confirmation: no field asks for the plan ID, and the form says what pressing Approve does (ginsys/bronzeward#1096).
     expect(PLAN_NOTE_APPROVE).not.toMatch(/plan ID|type/i);

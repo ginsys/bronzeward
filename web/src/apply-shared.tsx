@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { type Assignment, movedSources, reach, type Source } from "./apply-shared.ts";
+import { Panel } from "./layout.tsx";
 import { Ref, short, useItem, useList, usePending, useSettled } from "./list.tsx";
 import { NO_LONGER_FOLLOWED } from "./resources.tsx";
 import { safeText, safeWord } from "./safe.ts";
@@ -83,15 +84,14 @@ function Block({ r, moved, assignments }: { r: S["ReleaseBody"]; moved: Source[]
   }, [needPins, r.sources, read]);
   const ids = r.machines.map((m) => m.machine);
   return (
-    <section aria-label="Shared names this release moved" data-testid="apply-shared">
-      <h3>Shared names this release moved</h3>
+    <Panel title="Shared names this release moved" testid="apply-shared">
       <p>{APPLY_SHARED_NOTE}</p>
       <ul>
         {moved.map((s) => s.kind === "fragment" || s.kind === "profile"
           ? <Moved key={`${s.kind}:${s.head}`} s={s} cluster={r.cluster} ids={ids} assignments={assignments} pins={pins} />
           : <li key={`${s.kind}:${s.head}`}>{safeWord(s.kind)}: moved by this release; this page does not know how to show its reach.</li>)}
       </ul>
-    </section>
+    </Panel>
   );
 }
 
