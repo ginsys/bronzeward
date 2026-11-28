@@ -42,7 +42,12 @@ goldens)
 		sed -i 's/machinery v1\.14\.5/machinery v1.14.7/g' internal/clitest/testdata/journeys/t3.txt \
 			internal/clitest/testdata/journeys/t8.txt internal/clitest/testdata/journeys/t10.txt
 	fi
-	go test -p 1 -timeout 40m -run 'TestApprovals|TestDrift|TestProtected' ./internal/clitest/
+	go test -p 1 -timeout 40m -v -run 'TestApprovals|TestDrift|TestProtected' ./internal/clitest/ | tee "$work/goldens.log"
+	# A pass counts only if each of the three tests ran and passed, not if the run selected nothing.
+	for t in TestApprovals TestDrift TestProtected; do
+		grep --quiet --line-regexp -- "--- PASS: $t ([0-9.]*s)" "$work/goldens.log" || { echo "== $t did not run and pass" >&2; exit 1; }
+	done
+	echo "== the three golden tests ran and passed"
 	;;
 *)
 	echo "$0: unknown set $2" >&2
