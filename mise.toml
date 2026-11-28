@@ -453,6 +453,25 @@ depends = ["web:install"]
 dir = "web"
 run = "npm run verify"
 
+[tasks.web-schema]
+description = "Copy the pinned Talos machinery module's configuration schema to web/src/talos-schema/<contract>.json, the file the web console reads (TestWebSchemaAssets in internal/compile fails when it differs from the module's)"
+# The asset is the module's file byte for byte: the contract is the module version's minor. Run it
+# after a bump of the pinned module, and commit the result. install -m 644, because the module
+# cache holds read-only files and cp would keep the mode.
+run = '''
+set -eu
+mod=github.com/siderolabs/talos/pkg/machinery
+{% raw %}
+version=$(go list -m -f '{{.Version}}' "$mod")
+dir=$(go list -m -f '{{.Dir}}' "$mod")
+{% endraw %}
+[ -n "$dir" ] || { echo "web-schema: $mod is not in the module cache: run go mod download" >&2; exit 1; }
+contract=$(printf '%s' "$version" | sed -E 's/^(v[0-9]+\.[0-9]+)\..*$/\1/')
+mkdir -p web/src/talos-schema
+install -m 644 "$dir/config/schemas/config.schema.json" "web/src/talos-schema/$contract.json"
+sha256sum "web/src/talos-schema/$contract.json"
+'''
+
 [tasks.browser]
 description = "The real-browser cases against the test static host (BW_BROWSERS, default chrome,firefox), then the artifact scan"
 # Needs no server, database or identity provider: the host answers every API request with a
