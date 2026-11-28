@@ -274,13 +274,14 @@ export const EmptyList = ({ list, text }: { list: Listed<unknown>; text: ReactNo
 );
 
 // The count, the next page on request (one at a time), and the restart notice.
-export function More({ list, shown, more, busy }: { list: Listed<unknown>; shown: number; more: (() => void) | undefined; busy: boolean }) {
+// `secondary` draws Show more as the outline button, for a page whose one filled button is its own (the console layout, §2.3).
+export function More({ list, shown, more, busy, secondary = false }: { list: Listed<unknown>; shown: number; more: (() => void) | undefined; busy: boolean; secondary?: boolean }) {
   return (
     <>
       {list.restarted && <Status testid="restarted">{RESTARTED}</Status>}
       <p data-testid="count">
         {more === undefined ? `Showing ${shown} of ${list.items.length}.` : `Showing ${shown}; more pages to read.`}{" "}
-        {more !== undefined && <button type="button" onClick={more} disabled={busy}>Show more</button>}
+        {more !== undefined && <button type="button" {...(secondary && { className: "outline" })} onClick={more} disabled={busy}>Show more</button>}
       </p>
     </>
   );

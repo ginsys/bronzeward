@@ -226,7 +226,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
               ))}
             </tbody>
           </Scroll>
-          <More list={list.data} shown={shown.length} more={more} busy={busy} />
+          <More list={list.data} shown={shown.length} more={more} busy={busy} secondary />
         </>
       );
   }
@@ -269,7 +269,7 @@ export function Clusters() {
             ))}
           </tbody>
         </Scroll>
-        <More list={list.data} shown={list.data.items.length} more={more} busy={busy} />
+        <More list={list.data} shown={list.data.items.length} more={more} busy={busy} secondary />
       </>
     );
   }

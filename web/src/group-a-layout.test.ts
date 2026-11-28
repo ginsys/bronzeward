@@ -177,6 +177,26 @@ describe("the Machines list", () => {
   });
 });
 
+describe("a list with a next page keeps its page's one filled button", () => {
+  // Show more is a button of the page too: where it is drawn it is the outline, so the header's action stays the only filled one.
+  test("Machines: Add machine, with Show more outlined", async () => {
+    served["/machines"] = { items: [machine], next: "c1" };
+    await shown(h(Machines, { query: "", go: () => {} }));
+    const more = [...box.querySelectorAll("button")].find((b) => text(b) === "Show more")!;
+    expect(more).toBeDefined();
+    expect(more.className).toBe("outline");
+    expect(filled(box)).toEqual(["Add machine"]);
+  });
+  test("Clusters: Connect a cluster, with Show more outlined", async () => {
+    served["/clusters"] = { items: [cluster], next: "c1" };
+    await shown(h(Clusters, {}));
+    const more = [...box.querySelectorAll("button")].find((b) => text(b) === "Show more")!;
+    expect(more).toBeDefined();
+    expect(more.className).toBe("outline");
+    expect(filled(box)).toEqual(["Connect a cluster"]);
+  });
+});
+
 describe("the Clusters list", () => {
   test("a page header with its two actions, Connect a cluster the filled one; then one panel with the table", async () => {
     await shown(h(Clusters, {}));
