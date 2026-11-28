@@ -146,16 +146,18 @@ at A they pass unchanged, on two of three runs. In the one that failed (the seco
 first run of the final revision of `run/test2`), `TestApprovals` and `TestDrift` passed and
 `TestProtected` failed in `PROT-02` to `PROT-06`: `PROT-02`'s import start answered that its
 claim's lease had lapsed 17 s ago, and the four after it were refused because an ingestion of the
-same draft was still running. That run was slow (`TestApprovals` took 71 s there and 40 s in the
-last, passing one), the lease is a time bound, and the failure is at A, which has no v1.14.7 code; the
-third run passed. It is read as a timing failure under load of a test this change does not touch,
-and not isolated further. Both reruns check that the three tests ran and passed; the evidence
-keeps the failed run's lines. The skips are 17
-in the rest set and 9 in `internal/api`, each with the reason it printed in the summary: services the
-pod does not start (no `dbus-daemon` or `gnome-keyring-daemon`, no test identity provider, no Talos
-node, no packaged binaries); the browser harness's own steps (`TestE2E*`, three in `internal/api`);
-and two tests, `TestMachineryGate` and `TestSensitivityGate`, which are left to their own script
-(`experiments/c10-machinery-gate/run/all`) and are not run in a Go test run at A either.
+same draft was still running. That run was slower (`TestApprovals` took 71 s there and 40 s in the
+last, passing one) and the lease is a time bound, which fits a node under load; load was not
+measured, so that is a hypothesis. The failure is at A, which has no v1.14.7 code, and the third
+run passed. It is read as a timing failure of a test this change does not touch, and not isolated
+further. Both reruns check that the three tests ran and passed; the evidence keeps the failed
+run's output lines and the durations of both runs. The skips are 17
+in the rest set and 9 in `internal/api`, each listed in the summary with the reason it printed
+after its own `RUN` line: services the pod does not start (no `dbus-daemon` or
+`gnome-keyring-daemon`, no test identity provider, no Talos node, no packaged binaries); the
+browser harness's own steps (`TestE2E*`, three in `internal/api`); and two tests,
+`TestMachineryGate` and `TestSensitivityGate`, which skip unless their own script
+(`experiments/c10-machinery-gate/run/all`) sets them. The skip sets were read at C only.
 
 The web console reads the Talos config schema from `web/src/talos-schema/v1.14.json`.
 `TestWebSchemaAssets` passes at C; read directly, the asset and the module's
