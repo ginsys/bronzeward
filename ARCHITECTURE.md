@@ -15,7 +15,7 @@ Bronzeward is a server and a command-line client that keep the configuration of 
 | `cmd/bronzeward` | The `serve` command, and `migrate`, `token`, `orphans` and `version` | |
 | `cmd/bronzewardctl` | The operator's command line, over the HTTP API | Link a server package, except `internal/talos/discover` |
 | `api/` | `openapi.yaml`, the HTTP contract | |
-| `web/` | The browser console (Vite). `web/src` holds page components (`.tsx`) and logic (`.ts`). Reads of the Bronzeward API go through `request.ts`, writes through `write.ts`; sign-in (`auth.ts`, `userinfo.ts`) calls the identity provider directly | |
+| `web/` | The browser console (Vite). `web/src` holds page components (`.tsx`) and logic (`.ts`). Reads of the Bronzeward API go through `request.ts`, writes through `write.ts`; sign-in (`auth.ts`, `userinfo.ts`) calls the identity provider directly. `web/src/talos-schema/<contract>.json` is the pinned machinery module's configuration schema, copied by `mise run web-schema` and loaded on demand by `talos-schema.ts`; `internal/compile` tests that it equals the module's file and exists for exactly the supported contracts | |
 | `fixtures/`, `conformance/`, `packaging/` | A disposable test environment, the shared client test cases, packaging inputs | |
 | `internal/api` | The HTTP API: sign-in checks, roles per route, idempotency, transactions, and the background loops (import runner, publish worker, executor, adoption, drift) | Be imported by any package but `cmd/bronzeward` |
 | `internal/server` | Builds the HTTP handler | |

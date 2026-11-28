@@ -85,11 +85,23 @@ Three accepted rules bound this specification and stay as they are:
 - **How it reaches the page.** The content policy allows no third-party fetch
   ([client contracts §10.2](client-contracts.md#102-script-and-content-policy)). So the schema is a build
   asset of the web console, generated from the pinned module in the same build as the compiler. Form,
-  compiler and renderer then read one version. The page never reads the Talos documentation site.
-- **A second source is needed for secrets.** The schema does not say which fields hold a secret. The
-  compiler takes that from the module's `RedactSecrets` field list
-  ([compilation §2.4](compilation.md#24-what-identification-does-not-promise)). The build asset therefore
-  carries that list too, from the same module.
+  compiler and renderer then read one version. The page never reads the Talos documentation site. Build
+  item 1 made it a committed copy of the module's file (`mise run web-schema`), kept equal to the pinned
+  module's file, and to the supported contracts, by a test in the compiler's package.
+- **Secrets: the schema does not say which fields hold a secret, and the module holds no list that does.**
+  *Correction of 28 November 2026, not a new decision.* The first text of this specification said the
+  compiler takes the secret fields from a `RedactSecrets` field list of the module, and that the build
+  asset would carry that list too. The module holds no such list. `RedactSecrets` is code, written by hand
+  for each document kind, and the compiler finds the secret leaves of one document by encoding it with and
+  without redaction (`internal/compile/render.go`, `schemaLeaves`; `compilation.md` section 2.4 names
+  what that identification does not promise). So the schema asset carries
+  no secret list. How the form learns which fields are secret is decided when the editing build is
+  planned ([ginsys/bronzeward#1271](https://github.com/ginsys/bronzeward/issues/1271)): (a) a generator
+  on the pinned module that fills every document kind with sentinel values and compares the two
+  encodings, or (b) a hand-kept table with a test that fails when it drifts from such a comparison.
+  Either is a secret-identification decision, because a field the form misses gets a value box. The
+  parsed display of [section 5](#5-showing-an-imported-configuration-as-fields) needs no list: a secret in
+  stored text is already a `!bwref` reference and shows as its name.
 - **When the version is not known** (no contract, a contract not on the list, a missing asset, a
   document the schema cannot place): the page shows the text editor and one sentence that says why there
   is no form. It never guesses a nearby version, because a field can move between minors
@@ -145,12 +157,13 @@ Three accepted rules bound this specification and stay as they are:
    - A document that the parser reads with an error keeps the text editor and nothing is written.
    Fixtures hold synthetic values only
    ([client contracts §11.5](client-contracts.md#115-test-artifacts)).
-7. **Secrets.** A field on the secret list shows no value box. It shows a reference control: the person
+7. **Secrets.** A field the form knows to be secret shows no value box (how it knows is open, see the
+   correction of 28 November 2026 in [section 3](#3-where-the-structure-comes-from)). It shows a reference control: the person
    types the reference name and declares it (kind, version, encoding), as the references table does
    today. The page writes the tag `!bwref <name>` and the declaration together, in one save. The
-   name grammar is the one of [compilation §5.1](compilation.md#51-syntax). A field not on the list
-   but typed with a secret still goes through marks and extraction as today, and the form says that an
-   unmarked value outside the list carries no promise of detection
+   name grammar is the one of [compilation §5.1](compilation.md#51-syntax). A field the form does not
+   know to be secret, but typed with a secret, still goes through marks and extraction as today, and the form
+   says that an unmarked value outside what it knows carries no promise of detection
    ([compilation §2.4](compilation.md#24-what-identification-does-not-promise)). Every example, placeholder and
    fixture of the form holds a reference where a secret belongs, never a value.
 8. **Go to the problem.** A refusal that names a reference, a mark position or a path moves focus to the
@@ -181,8 +194,10 @@ a use of the parsed display of section 5 and is not part of this specification.
   comments included.
 - A field the schema does not know, or the view cannot place, shows under *Other settings* with its raw lines,
   as in the editor.
-- Values on the secret list are already references in the stored text. They show as the reference name, never
-  as a value. A value that nobody marked can still be in the stored text
+- A value already stored as a reference (the `!bwref` tag) shows as the reference name, never as a value, and
+  the display needs no list of secret fields to do so (correction of 28 November 2026: an earlier text of
+  this bullet named a list of secret fields, which the module does not hold, see
+  [section 3](#3-where-the-structure-comes-from)). A value that nobody marked can still be in the stored text
   ([operator experience §9](operator-experience.md#9-secret-handling-in-the-clients)); the notice stays, and the
   parsed view makes no claim that it is clear of one.
 - The fragment revision pages are outside this specification. Their accepted display (the text in a `pre`, with its
@@ -273,7 +288,7 @@ fragment; leave profiles and assignments unchanged.
 
 | Choice | Option | For | Against |
 | --- | --- | --- | --- |
-| Source of forms | **A. Schema-driven**, from the pinned schema | One source with the compiler; a new Talos minor needs a new asset, not new forms; covers every field | A generic renderer for choices, maps and lists is real work; the schema carries no secret flag, so the list is a second asset |
+| Source of forms | **A. Schema-driven**, from the pinned schema | One source with the compiler; a new Talos minor needs a new asset, not new forms; covers every field | A generic renderer for choices, maps and lists is real work; the schema carries no secret flag, and the module holds no list of secret fields to take it from (correction of 28 November 2026, [section 3](#3-where-the-structure-comes-from)) |
 | | **B. Hand-made**, common fields only | Better labels and order for the few fields people change most | A second model that drifts at every Talos minor, which is what choice C3 feared; the rest stays text |
 | First build | **1. Parsed read-only display first** | Proves the schema asset, the version choice and the round trip before anything writes; answers "not parsed forms" at once | The person still edits as text for a while |
 | | **2. Editing first** | The text box is where a person edits today | Writes before the parser has a record |
@@ -296,19 +311,21 @@ objects. Everything else is *Other settings*.
 
 ## 10. Build items
 
-Small pull requests, in order. Each leaves the API, the stored text, marks and the references table
-unchanged. The project lead files the issues after this document merges, one per behaviour.
+Small pull requests, in order. Each leaves the API contract and the format of stored text, marks and
+declarations unchanged. The project lead files the issues after this document merges, one per behaviour.
 
-1. **Schema asset and contract choice, no screen.** Generate the schema and the secret-field list from the
-   pinned module in the web build; pick the asset by the cluster's contract; say "no form" when there is none.
-   Test: the asset's digest equals the module's file.
+1. **Schema asset and contract choice, no screen.** Carry the schema of the pinned module in the web build
+   (no secret list: see the correction of 28 November 2026 in [section 3](#3-where-the-structure-comes-from));
+   pick the asset by the cluster's contract; say "no form" when there is none. Test: the asset's digest
+   equals the module's file.
 2. **Parsed read-only display of an imported configuration**, with *Show raw text* and the hidden comments.
    Leaves the protected-document rules and the notice unchanged.
 3. **Form editing of single fields in the fragment editor** (text, number, yes or no, choice) with the round-trip
    test table. Leaves the text editor, the conflict view and *Revert to base* unchanged.
 4. **Lists, maps and nested objects**, with row moves. Leaves everything in item 3 unchanged.
 5. **The reference control for secret fields**, with the declaration written in the same save, and
-   *Mark as secret* on a field.
+   *Mark as secret* on a field. Its plan first decides how the form learns which fields are secret, with
+   the cost of each option stated (section 3, correction of 28 November 2026).
 6. **Go to the problem** from a refusal into a field. Leaves the text positions unchanged.
 7. **Bring the rest of operator experience in line** with what items 1 to 6 built: the wireframe of the
    fragment editor and any other text that still shows a plain text box as the only editor. Choice C3 and
